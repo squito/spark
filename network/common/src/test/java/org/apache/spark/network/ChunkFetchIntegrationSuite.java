@@ -18,6 +18,7 @@
 package org.apache.spark.network;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.util.Collections;
@@ -54,16 +55,16 @@ public class ChunkFetchIntegrationSuite {
   static final long STREAM_ID = 1;
   static final int BUFFER_CHUNK_INDEX = 0;
   static final int FILE_CHUNK_INDEX = 1;
+  static final int LARGE_FILE_CHUNK_INDEX = 2;
 
   static TransportServer server;
   static TransportClientFactory clientFactory;
   static StreamManager streamManager;
   static File testFile;
+  static File testLargeFile;
 
   static ManagedBuffer bufferChunk;
   static ManagedBuffer fileChunk;
-
-  private TransportConf transportConf;
 
   @BeforeClass
   public static void setUp() throws Exception {
@@ -83,6 +84,17 @@ public class ChunkFetchIntegrationSuite {
     fp.write(fileContent);
     fp.close();
 
+    //3gb total
+    testLargeFile = File.createTempFile("shuffle-test-large-file", "txt");
+    FileOutputStream out = new FileOutputStream(testLargeFile);
+    for (int i = 0; i < 3000000; i++) {
+      new Random().nextBytes(fileContent);
+      out.write(fileContent);
+    }
+    out.close();
+    System.out.println(testLargeFile + " has size " + testLargeFile.length());
+
+
     final TransportConf conf = new TransportConf(new SystemPropertyConfigProvider());
     fileChunk = new FileSegmentManagedBuffer(conf, testFile, 10, testFile.length() - 25);
 
@@ -94,6 +106,8 @@ public class ChunkFetchIntegrationSuite {
           return new NioManagedBuffer(buf);
         } else if (chunkIndex == FILE_CHUNK_INDEX) {
           return new FileSegmentManagedBuffer(conf, testFile, 10, testFile.length() - 25);
+        } else if (chunkIndex == LARGE_FILE_CHUNK_INDEX) {
+          return new FileSegmentManagedBuffer(conf, testLargeFile, 10, testLargeFile.length() - 25);
         } else {
           throw new IllegalArgumentException("Invalid chunk index: " + chunkIndex);
         }
@@ -120,6 +134,7 @@ public class ChunkFetchIntegrationSuite {
     server.close();
     clientFactory.close();
     testFile.delete();
+    testLargeFile.delete();
   }
 
   class FetchResult {
@@ -186,6 +201,18 @@ public class ChunkFetchIntegrationSuite {
     assertBufferListsEqual(res.buffers, Lists.newArrayList(fileChunk));
     res.releaseBuffers();
   }
+
+
+  @Test
+  public void fetchLargeFileChunk() throws Exception {
+    System.out.println("beginning fetch large chunk");
+    FetchResult res = fetchChunks(Lists.newArrayList(LARGE_FILE_CHUNK_INDEX));
+    assertEquals(Sets.newHashSet(LARGE_FILE_CHUNK_INDEX), res.successChunks);
+    assertTrue(res.failedChunks.isEmpty());
+    assertBufferListsEqual(res.buffers, Lists.newArrayList(fileChunk));
+    res.releaseBuffers();
+  }
+
 
   @Test
   public void fetchNonExistentChunk() throws Exception {

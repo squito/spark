@@ -19,25 +19,35 @@ package org.apache.spark.network.protocol;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
+import io.netty.handler.codec.FixedLengthFrameDecoder;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import org.apache.spark.network.buffer.LargeByteBuf;
 
+import java.util.Arrays;
 import java.util.List;
 
-public class LargeFrameDecoder extends ByteToMessageDecoder {
+public class FixedChunkLargeFrameDecoder extends ByteToMessageDecoder {
 
-  Helper subDecoder = new Helper();
+  public FixedChunkLargeFrameDecoder(int chunkSize) {
+    this.chunkSize = chunkSize;
+  }
+
+  final int chunkSize;
+  Helper subDecoder = null;
   LargeByteBuf buf = new LargeByteBuf();
   boolean hasChunkInfo = false;
   long totalLength;
-  int numChunks;
+  long remaining;
+  int nextChunkSize;
 
   protected final void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
     if (!hasChunkInfo) {
-      if (in.readableBytes() >= 12) {
+      if (in.readableBytes() >= 8) {
         totalLength = in.readLong();
-        numChunks = in.readInt();
+        remaining = totalLength - 8;
         hasChunkInfo = true;
+        nextChunkSize = (int) Math.min(remaining, chunkSize);
+        subDecoder = new Helper(nextChunkSize);
       }
     }
 
@@ -45,9 +55,14 @@ public class LargeFrameDecoder extends ByteToMessageDecoder {
       ByteBuf nextChunk = null;
       while ((nextChunk = subDecoder.decode(ctx, in)) != null ){
         buf.bufs.add(nextChunk);
-        if (buf.bufs.size() == numChunks) {
+        remaining -= nextChunkSize;
+        nextChunkSize = (int) Math.min(remaining, chunkSize);
+        if (remaining == 0) {
           out.add(buf);
           buf = new LargeByteBuf();
+          return;
+        } else {
+          subDecoder = new Helper(nextChunkSize);
         }
       }
     }
@@ -55,9 +70,9 @@ public class LargeFrameDecoder extends ByteToMessageDecoder {
 
 
   //just to expose the decode method
-  static class Helper extends LengthFieldBasedFrameDecoder {
-    Helper() {
-      super(Integer.MAX_VALUE, 0, 4, -4, 4);
+  static class Helper extends FixedLengthFrameDecoder {
+    Helper(int frameLength) {
+      super(frameLength);
     }
 
     @Override
@@ -67,4 +82,12 @@ public class LargeFrameDecoder extends ByteToMessageDecoder {
     }
   }
 
-}
+  private String bufString(ByteBuf actual) {
+    actual.markReaderIndex();
+    byte[] readBytes = new byte[actual.readableBytes()];
+    actual.getBytes(0, readBytes);
+    actual.resetReaderIndex();
+    return Arrays.toString(readBytes);
+  }
+
+  }

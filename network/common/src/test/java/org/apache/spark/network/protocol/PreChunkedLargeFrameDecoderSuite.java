@@ -27,12 +27,12 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class LargeFrameDecoderSuite {
+public class PreChunkedLargeFrameDecoderSuite {
 
   @Test
   public void testSmallMsg() {
-    EmbeddedChannel serverChannel = new EmbeddedChannel(new LargeFrameDecoder());
-    EmbeddedChannel clientChannel = new EmbeddedChannel(new LargeFrameDecoder());
+    EmbeddedChannel serverChannel = new EmbeddedChannel(new PreChunkedLargeFrameDecoder());
+    EmbeddedChannel clientChannel = new EmbeddedChannel(new PreChunkedLargeFrameDecoder());
 
     //our msg will be:
     // 8 byte total length
@@ -65,8 +65,8 @@ public class LargeFrameDecoderSuite {
 
   @Test
   public void testSmallMultiMsg() {
-    EmbeddedChannel serverChannel = new EmbeddedChannel(new LargeFrameDecoder());
-    EmbeddedChannel clientChannel = new EmbeddedChannel(new LargeFrameDecoder());
+    EmbeddedChannel serverChannel = new EmbeddedChannel(new PreChunkedLargeFrameDecoder());
+    EmbeddedChannel clientChannel = new EmbeddedChannel(new PreChunkedLargeFrameDecoder());
 
     //our msg will be:
     // 8 byte total length
@@ -105,8 +105,8 @@ public class LargeFrameDecoderSuite {
   @Test
   public void testLargeMsg() {
     // Requires a lot of memory, should be labeled as an integration test
-    EmbeddedChannel serverChannel = new EmbeddedChannel(new LargeFrameDecoder());
-    EmbeddedChannel clientChannel = new EmbeddedChannel(new LargeFrameDecoder());
+    EmbeddedChannel serverChannel = new EmbeddedChannel(new PreChunkedLargeFrameDecoder());
+    EmbeddedChannel clientChannel = new EmbeddedChannel(new PreChunkedLargeFrameDecoder());
 
     //our msg will be:
     // 8 byte total length

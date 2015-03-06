@@ -19,6 +19,7 @@ package org.apache.spark.network.protocol;
 
 import com.google.common.base.Objects;
 import io.netty.buffer.ByteBuf;
+import org.apache.spark.network.buffer.LargeByteBuf;
 
 /**
 * Encapsulates a request for a particular chunk of a stream.
@@ -48,6 +49,14 @@ public final class StreamChunkId implements Encodable {
     int chunkIndex = buffer.readInt();
     return new StreamChunkId(streamId, chunkIndex);
   }
+
+  public static StreamChunkId decode(LargeByteBuf buffer) {
+    assert buffer.readableBytes() >= 8 + 4;
+    long streamId = buffer.readLong();
+    int chunkIndex = buffer.readInt();
+    return new StreamChunkId(streamId, chunkIndex);
+  }
+
 
   @Override
   public int hashCode() {

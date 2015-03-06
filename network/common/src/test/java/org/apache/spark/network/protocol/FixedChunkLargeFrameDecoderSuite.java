@@ -119,7 +119,7 @@ public class FixedChunkLargeFrameDecoderSuite {
   }
 
   private void verifyChunks(long expMsgLength, int decodeChunkSize, LargeByteBuf received) {
-    assertEquals(expMsgLength, received.size());
+    assertEquals(expMsgLength, received.readableBytes());
     int nExpDecodeChunks = (int) Math.ceil(expMsgLength / (double)decodeChunkSize);
     assertEquals(nExpDecodeChunks, received.bufs.size());
     Random r = new Random(0);

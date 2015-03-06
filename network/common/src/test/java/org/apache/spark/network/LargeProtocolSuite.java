@@ -17,10 +17,7 @@
 
 package org.apache.spark.network;
 
-import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
-import org.apache.spark.network.buffer.LargeByteBuf;
-import org.apache.spark.network.buffer.NettyLargeManagedBuffer;
 import org.apache.spark.network.protocol.*;
 import org.apache.spark.network.util.NettyUtils;
 import org.junit.Test;

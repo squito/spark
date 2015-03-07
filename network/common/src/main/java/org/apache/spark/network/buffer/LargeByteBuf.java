@@ -42,6 +42,13 @@ public class LargeByteBuf {
     }
   }
 
+  public void release() {
+    for (ByteBuf buf: bufs) {
+      buf.release();
+    }
+  }
+
+
   public LargeByteBuf duplicate() {
     LargeByteBuf r = new LargeByteBuf();
     for (ByteBuf buf: bufs) {

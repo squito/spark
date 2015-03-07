@@ -21,6 +21,7 @@ import io.netty.buffer.Unpooled;
 import org.apache.spark.network.buffer.*;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 
 /**
@@ -52,6 +53,23 @@ public class TestLargeManagedBuffer extends LargeManagedBuffer {
   @Override
   public long size() {
     return underlying.size();
+  }
+
+  @Override
+  public InputStream createInputStream() throws IOException {
+    return underlying.createInputStream();
+  }
+
+  @Override
+  public LargeManagedBuffer retain() {
+    underlying.retain();
+    return this;
+  }
+
+  @Override
+  public LargeManagedBuffer release() {
+    underlying.release();
+    return this;
   }
 
   @Override

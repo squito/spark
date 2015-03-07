@@ -17,11 +17,21 @@
 package org.apache.spark.network.buffer;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 
 public abstract class LargeManagedBuffer {
 
   public abstract long size();
 
+  public abstract InputStream createInputStream() throws IOException;
+
+  public abstract LargeManagedBuffer retain();
+
+  public abstract LargeManagedBuffer release();
+
+  /**
+   * Convert the buffer into Netty objects, used to write the data out.
+   */
   public abstract List<? extends Object> convertToNetty() throws IOException;
 }

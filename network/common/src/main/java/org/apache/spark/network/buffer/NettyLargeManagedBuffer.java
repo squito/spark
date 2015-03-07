@@ -16,6 +16,8 @@
  */
 package org.apache.spark.network.buffer;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 
 public class NettyLargeManagedBuffer extends LargeManagedBuffer {
@@ -27,6 +29,23 @@ public class NettyLargeManagedBuffer extends LargeManagedBuffer {
 
   public long size(){
     return byteBuf.readableBytes();
+  }
+
+  @Override
+  public InputStream createInputStream() throws IOException {
+    throw new RuntimeException("TODO");
+  }
+
+  @Override
+  public LargeManagedBuffer retain() {
+    byteBuf.retain();
+    return this;
+  }
+
+  @Override
+  public LargeManagedBuffer release() {
+    byteBuf.release();
+    return this;
   }
 
   public List<? extends Object> convertToNetty() {

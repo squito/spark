@@ -17,10 +17,13 @@
 
 package org.apache.spark.network;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import com.google.common.collect.Lists;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -103,17 +106,34 @@ public class TransportContext {
   public TransportChannelHandler initializePipeline(SocketChannel channel) {
     try {
       TransportChannelHandler channelHandler = createChannelHandler(channel);
-      channel.pipeline()
-        .addLast("encoder", encoder)
-        .addLast("frameDecoder", NettyUtils.createFrameDecoder())
-        .addLast("decoder", decoder)
-        // NOTE: Chunks are currently guaranteed to be returned in the order of request, but this
-        // would require more logic to guarantee if this were not part of the same event loop.
-        .addLast("handler", channelHandler);
+      ChannelPipeline pipeline = channel.pipeline();
+      for(Handler h: getHandlers()) {
+        pipeline.addLast(h.name, h.handler);
+      }
+      // NOTE: Chunks are currently guaranteed to be returned in the order of request, but this
+      // would require more logic to guarantee if this were not part of the same event loop.
+      pipeline.addLast("handler", channelHandler);
       return channelHandler;
     } catch (RuntimeException e) {
       logger.error("Error while initializing Netty pipeline", e);
       throw e;
+    }
+  }
+
+  protected List<Handler> getHandlers() {
+    ArrayList<Handler> r = new ArrayList<Handler>();
+    r.add(new Handler("encoder", encoder));
+    r.add(new Handler("frameDecoder", NettyUtils.createFrameDecoder()));
+    r.add(new Handler("decoder", decoder));
+    return r;
+  }
+
+  protected static class Handler {
+    public String name;
+    public ChannelHandler handler;
+    public Handler(String name, ChannelHandler handler) {
+      this.name = name;
+      this.handler = handler;
     }
   }
 

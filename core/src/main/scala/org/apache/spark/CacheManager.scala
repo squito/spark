@@ -19,6 +19,7 @@ package org.apache.spark
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.reflect.ClassTag
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage._
@@ -76,7 +77,8 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
 
           // Otherwise, cache the values and keep track of any updates in block statuses
           val updatedBlocks = new ArrayBuffer[(BlockId, BlockStatus)]
-          val cachedValues = putInBlockManager(key, computedValues, storageLevel, updatedBlocks)
+          val cachedValues = putInBlockManager(key, computedValues, storageLevel, updatedBlocks)(
+            rdd.elementClassTag)
           val metrics = context.taskMetrics
           val lastUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq[(BlockId, BlockStatus)]())
           metrics.updatedBlocks = Some(lastUpdatedBlocks ++ updatedBlocks.toSeq)
@@ -137,7 +139,7 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
    * MEMORY_AND_DISK partition to disk if there is not enough room to unroll the partition,
    * while preserving the the original semantics of the RDD as specified by the application.
    */
-  private def putInBlockManager[T](
+  private def putInBlockManager[T: ClassTag](
       key: BlockId,
       values: Iterator[T],
       level: StorageLevel,
@@ -174,7 +176,7 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
           // We have successfully unrolled the entire partition, so cache it in memory
           updatedBlocks ++=
             blockManager.putArray(key, arr, level, tellMaster = true, effectiveStorageLevel)
-          arr.iterator.asInstanceOf[Iterator[T]]
+          arr.iterator
         case Right(it) =>
           // There is not enough space to cache this partition in memory
           val returnValues = it.asInstanceOf[Iterator[T]]

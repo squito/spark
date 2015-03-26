@@ -22,6 +22,7 @@ import java.util.LinkedHashMap
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.reflect.ClassTag
 
 import org.apache.spark.util.{SizeEstimator, Utils}
 import org.apache.spark.util.collection.SizeTrackingVector
@@ -120,7 +121,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
 
   override def putArray(
       blockId: BlockId,
-      values: Array[Any],
+      values: Array[_],
       level: StorageLevel,
       returnValues: Boolean): PutResult = {
     if (level.deserialized) {
@@ -240,11 +241,11 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
    * This method returns either an array with the contents of the entire block or an iterator
    * containing the values of the block (if the array would have exceeded available memory).
    */
-  def unrollSafely(
+  def unrollSafely[T: ClassTag](
       blockId: BlockId,
-      values: Iterator[Any],
+      values: Iterator[T],
       droppedBlocks: ArrayBuffer[(BlockId, BlockStatus)])
-    : Either[Array[Any], Iterator[Any]] = {
+    : Either[Array[T], Iterator[T]] = {
 
     // Number of elements unrolled so far
     var elementsUnrolled = 0
@@ -261,7 +262,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     // Previous unroll memory held by this thread, for releasing later (only at the very end)
     val previousMemoryReserved = currentUnrollMemoryForThisThread
     // Underlying vector for unrolling the block
-    var vector = new SizeTrackingVector[Any]
+    var vector = new SizeTrackingVector[T]
 
     // Request enough memory to begin unrolling
     keepUnrolling = reserveUnrollMemoryForThisThread(initialMemoryThreshold)

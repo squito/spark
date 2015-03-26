@@ -58,7 +58,7 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
 
   override def putArray(
       blockId: BlockId,
-      values: Array[Any],
+      values: Array[_],
       level: StorageLevel,
       returnValues: Boolean): PutResult = {
     putIterator(blockId, values.toIterator, level, returnValues)

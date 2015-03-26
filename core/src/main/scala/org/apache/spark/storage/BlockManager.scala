@@ -45,7 +45,7 @@ import org.apache.spark.util._
 private[spark] sealed trait BlockValues
 private[spark] case class ByteBufferValues(buffer: ByteBuffer) extends BlockValues
 private[spark] case class IteratorValues(iterator: Iterator[Any]) extends BlockValues
-private[spark] case class ArrayValues(buffer: Array[Any]) extends BlockValues
+private[spark] case class ArrayValues(buffer: Array[_]) extends BlockValues
 
 /* Class for returning a fetched block and associated metrics. */
 private[spark] class BlockResult(
@@ -665,7 +665,7 @@ private[spark] class BlockManager(
    */
   def putArray(
       blockId: BlockId,
-      values: Array[Any],
+      values: Array[_],
       level: StorageLevel,
       tellMaster: Boolean = true,
       effectiveStorageLevel: Option[StorageLevel] = None): Seq[(BlockId, BlockStatus)] = {

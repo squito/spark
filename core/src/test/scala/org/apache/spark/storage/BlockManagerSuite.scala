@@ -1033,15 +1033,15 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
   /**
    * Verify the result of MemoryStore#unrollSafely is as expected.
    */
-  private def verifyUnroll(
-      expected: Iterator[Any],
-      result: Either[Array[Any], Iterator[Any]],
+  private def verifyUnroll[T](
+      expected: Iterator[T],
+      result: Either[Array[T], Iterator[T]],
       shouldBeArray: Boolean): Unit = {
-    val actual: Iterator[Any] = result match {
-      case Left(arr: Array[Any]) =>
+    val actual: Iterator[T] = result match {
+      case Left(arr: Array[T]) =>
         assert(shouldBeArray, "expected iterator from unroll!")
         arr.iterator
-      case Right(it: Iterator[Any]) =>
+      case Right(it: Iterator[T]) =>
         assert(!shouldBeArray, "expected array from unroll!")
         it
       case _ =>

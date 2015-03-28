@@ -39,6 +39,22 @@ class MultiBlockSerializerSuite extends FunSuite with Matchers {
     data.foreach{arr => ser.writeObject(arr)}
 
     ser.blockEndpoints should be (Seq(9, 12, 22, 32, 33))
+    val blocks = ser.toBlocks
+    blocks.size should be (6)
+    blocks.zipWithIndex.foreach {
+      case (bytes, 0) =>
+        bytes should be (data(0) ++ data(1) ++ data(2))
+      case (bytes, 1) =>
+        bytes should be (data(3))
+      case (bytes, 2) =>
+        bytes should be (data(4))
+      case (bytes, 3) =>
+        bytes should be (data(5) ++ data(6) ++ data(7))
+      case (bytes, 4) =>
+        bytes should be (data(8))
+      case (bytes, 5) =>
+        bytes should be (data(9))
+    }
   }
 
   test("blockify with multiple chunks") {

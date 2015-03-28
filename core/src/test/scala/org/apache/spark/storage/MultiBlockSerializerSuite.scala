@@ -41,19 +41,17 @@ class MultiBlockSerializerSuite extends FunSuite with Matchers {
     ser.blockEndpoints should be (Seq(9, 12, 22, 32, 33))
     val blocks = ser.toBlocks
     blocks.size should be (6)
-    blocks.zipWithIndex.foreach {
-      case (bytes, 0) =>
-        bytes should be (data(0) ++ data(1) ++ data(2))
-      case (bytes, 1) =>
-        bytes should be (data(3))
-      case (bytes, 2) =>
-        bytes should be (data(4))
-      case (bytes, 3) =>
-        bytes should be (data(5) ++ data(6) ++ data(7))
-      case (bytes, 4) =>
-        bytes should be (data(8))
-      case (bytes, 5) =>
-        bytes should be (data(9))
+    val exp = Seq(
+      0 to 2,
+      Seq(3),
+      Seq(4),
+      5 to 7,
+      Seq(8),
+      Seq(9)
+    )
+    blocks.zipWithIndex.foreach { case (bytes, idx) =>
+      val expBytes = exp(idx).map { idx => data(idx)}.reduce { _ ++ _ }
+      bytes should be (expBytes)
     }
   }
 

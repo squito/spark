@@ -24,11 +24,20 @@ import org.apache.spark.serializer.{SerializerInstance, SerializationStream}
 import org.apache.spark.util.Utils
 import org.apache.spark.util.io.ByteArrayChunkOutputStream
 
-private[spark] class MultiBlockSerializer(
+private[storage] class MultiBlockSerializer private[storage](
     baseSerializer: SerializerInstance,
-    val maxBlockSize: Int = Integer.MAX_VALUE - 1e6.toInt) extends SerializationStream {
+    val maxBlockSize: Int,
+    val chunkSize: Int) extends SerializationStream {
 
-  private val out = new ByteArrayChunkOutputStream(65536)
+  def this(baseSerializer: SerializerInstance, maxBlockSize: Int) = {
+    this(baseSerializer, maxBlockSize, 65536)
+  }
+
+  def this(baseSerializer: SerializerInstance) = {
+    this(baseSerializer, Integer.MAX_VALUE - 1e6.toInt)
+  }
+
+  private val out = new ByteArrayChunkOutputStream(chunkSize)
   private val stream = baseSerializer.serializeStream(out)
   private var lastBlockStart: Long = 0L
   private var lastRecordEnd: Long = 0L

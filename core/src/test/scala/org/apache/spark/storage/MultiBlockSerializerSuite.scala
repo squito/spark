@@ -28,14 +28,15 @@ import org.apache.spark.serializer.{SerializationStream, DeserializationStream, 
 
 class MultiBlockSerializerSuite extends FunSuite with Matchers {
 
+  val rng = new Random()
+  val data = Seq(3,3,3,3,10,5,4,1,1,10).map{length =>
+    val arr = new Array[Byte](length)
+    rng.nextBytes(arr)
+    arr
+  }
+
   test("blockify") {
     val ser = new MultiBlockSerializer(new DummySerializer, 10)
-    val rng = new Random()
-    val data = Seq(3,3,3,3,10,5,4,1,1,10).map{length =>
-      val arr = new Array[Byte](length)
-      rng.nextBytes(arr)
-      arr
-    }
     data.foreach{arr => ser.writeObject(arr)}
 
     ser.blockEndpoints should be (Seq(9, 12, 22, 32, 33))
@@ -56,7 +57,26 @@ class MultiBlockSerializerSuite extends FunSuite with Matchers {
   }
 
   test("blockify with multiple chunks") {
-    pending
+    val chunkSize = 5
+    val blockSize = 14
+
+    val ser = new MultiBlockSerializer(new DummySerializer, maxBlockSize = blockSize,
+      chunkSize = chunkSize)
+    data.foreach{arr => ser.writeObject(arr)}
+
+    ser.blockEndpoints should be (Seq(12, 22, 33))
+    val blocks = ser.toBlocks
+    blocks.size should be (4)
+    val exp = Seq(
+      0 to 3,
+      Seq(4),
+      5 to 8,
+      Seq(9)
+    )
+    blocks.zipWithIndex.foreach { case (bytes, idx) =>
+      val expBytes = exp(idx).map { idx => data(idx)}.reduce { _ ++ _ }
+      bytes should be (expBytes)
+    }
   }
 
   test("error on records too large") {

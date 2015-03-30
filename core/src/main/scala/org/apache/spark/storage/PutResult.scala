@@ -20,13 +20,31 @@ package org.apache.spark.storage
 import java.nio.ByteBuffer
 
 /**
- * Result of adding a block into a BlockStore. This case class contains a few things:
+ * Result of adding a block group into a BlockStore. This case class contains a few things:
  *   (1) The estimated size of the put,
  *   (2) The values put if the caller asked for them to be returned (e.g. for chaining
  *       replication), and
- *   (3) A list of blocks dropped as a result of this put. This is always empty for DiskStore.
+ *   (3) the ids & sizes of the created blocks
+ *   (4) A list of blocks dropped as a result of this put. This is always empty for DiskStore.
  */
 private[spark] case class PutResult(
     size: Long,
-    data: Either[Iterator[_], ByteBuffer],
-    droppedBlocks: Seq[(BlockId, BlockStatus)] = Seq.empty)
+    createdBlocks: Seq[(BlockId, Int)],
+    data: Either[Iterator[_], Seq[ByteBuffer]],
+    droppedBlocks: Seq[(BlockId, BlockStatus)] = Seq.empty) {
+
+  def createdBlockBytes: Iterator[(BlockId, ByteBuffer)] = {
+    data match {
+      case Right(bbs) => bbs.iterator.zip(createdBlocks.iterator).map { case (bb, (blockId, _)) =>
+          blockId -> bb
+      }
+      case Left(_) => Iterator()
+    }
+  }
+}
+
+object PutResult {
+  def apply(blockId: BlockId, bytes: ByteBuffer): PutResult = {
+    PutResult(bytes.limit(), Seq(blockId -> bytes.limit()), Right(Seq(bytes)))
+  }
+}

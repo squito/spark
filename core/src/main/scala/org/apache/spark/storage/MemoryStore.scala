@@ -95,7 +95,8 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       putIterator(blockId, values, level, returnValues = true)
     } else {
       val putAttempt = tryToPut(blockId, bytes, bytes.limit, deserialized = false)
-      PutResult(bytes.limit(), Right(bytes.duplicate()), putAttempt.droppedBlocks)
+      PutResult(bytes.limit(), Seq(blockId -> bytes.limit()), Right(Seq(bytes.duplicate())),
+        putAttempt.droppedBlocks)
     }
   }
 
@@ -112,11 +113,11 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     val data =
       if (putAttempt.success) {
         assert(bytes.limit == size)
-        Right(bytes.duplicate())
+        Right(Seq(bytes.duplicate()))
       } else {
         null
       }
-    PutResult(size, data, putAttempt.droppedBlocks)
+    PutResult(size, Seq(blockId -> size.toInt), data, putAttempt.droppedBlocks)
   }
 
   override def putArray(
@@ -127,11 +128,13 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     if (level.deserialized) {
       val sizeEstimate = SizeEstimator.estimate(values.asInstanceOf[AnyRef])
       val putAttempt = tryToPut(blockId, values, sizeEstimate, deserialized = true)
-      PutResult(sizeEstimate, Left(values.iterator), putAttempt.droppedBlocks)
+      PutResult(sizeEstimate, Seq(blockId -> sizeEstimate.toInt), Left(values.iterator),
+        putAttempt.droppedBlocks)
     } else {
       val bytes = blockManager.dataSerialize(blockId, values.iterator)
       val putAttempt = tryToPut(blockId, bytes, bytes.limit, deserialized = false)
-      PutResult(bytes.limit(), Right(bytes.duplicate()), putAttempt.droppedBlocks)
+      PutResult(bytes.limit(), Seq(blockId -> bytes.limit()), Right(Seq(bytes.duplicate())),
+        putAttempt.droppedBlocks)
     }
   }
 
@@ -168,15 +171,15 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
         // Values are fully unrolled in memory, so store them as an array
         val res = putArray(blockId, arrayValues, level, returnValues)
         droppedBlocks ++= res.droppedBlocks
-        PutResult(res.size, res.data, droppedBlocks)
+        res.copy(droppedBlocks = droppedBlocks)
       case Right(iteratorValues) =>
         // Not enough space to unroll this block; drop to disk if applicable
         if (level.useDisk && allowPersistToDisk) {
           logWarning(s"Persisting block $blockId to disk instead.")
           val res = blockManager.diskStore.putIterator(blockId, iteratorValues, level, returnValues)
-          PutResult(res.size, res.data, droppedBlocks)
+          res.copy(droppedBlocks = droppedBlocks)
         } else {
-          PutResult(0, Left(iteratorValues), droppedBlocks)
+          PutResult(0, Seq(blockId -> 0), Left(iteratorValues), droppedBlocks)
         }
     }
   }

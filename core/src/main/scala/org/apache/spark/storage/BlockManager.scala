@@ -741,7 +741,7 @@ private[spark] class BlockManager(
     var valuesAfterPut: Iterator[Any] = null
 
     // Ditto for the bytes after the put
-    var bytesAfterPut: ByteBuffer = null
+    var bytesAfterPut: Seq[ByteBuffer] = null
 
     // Size of the block in bytes
     var size = 0L
@@ -759,7 +759,7 @@ private[spark] class BlockManager(
       case _ => null
     }
 
-    putBlockInfo.synchronized {
+    val putResult: PutResult = putBlockInfo.synchronized {
       logTrace("Put for block %s took %s to get into synchronized block"
         .format(blockId, Utils.getUsedTimeMs(startTimeMs)))
 
@@ -818,6 +818,7 @@ private[spark] class BlockManager(
           }
           updatedBlocks += ((blockId, putBlockStatus))
         }
+        result
       } finally {
         // If we failed in putting the block to memory/disk, notify other possible readers
         // that it has failed, and then remove it from the block info map.
@@ -848,9 +849,12 @@ private[spark] class BlockManager(
               throw new SparkException(
                 "Underlying put returned neither an Iterator nor bytes! This shouldn't happen.")
             }
-            bytesAfterPut = dataSerialize(blockId, valuesAfterPut)
+            //XXX IR
+            bytesAfterPut = Seq(dataSerialize(blockId, valuesAfterPut))
           }
-          replicate(blockId, bytesAfterPut, putLevel)
+          putResult.createdBlockBytes.foreach { case (blockId, bytes) =>
+              replicate(blockId, bytes, putLevel)
+          }
           logDebug("Put block %s remotely took %s"
             .format(blockId, Utils.getUsedTimeMs(remoteStartTime)))
       }
@@ -1249,6 +1253,12 @@ private[spark] object BlockManager extends Logging {
    * waiting for the GC to find it because that could lead to huge numbers of open files. There's
    * unfortunately no standard API to do this.
    */
+  def dispose(buffers: Seq[ByteBuffer]): Unit = {
+    if (buffers != null) {
+      buffers.foreach(dispose)
+    }
+  }
+
   def dispose(buffer: ByteBuffer): Unit = {
     if (buffer != null && buffer.isInstanceOf[MappedByteBuffer]) {
       logTrace(s"Unmapping $buffer")

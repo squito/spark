@@ -16,17 +16,32 @@
  */
 package org.apache.spark.storage
 
-import java.io.{OutputStream, InputStream}
+import java.io.{FileInputStream, File, OutputStream, InputStream}
 import java.nio.ByteBuffer
 
 import scala.reflect.ClassTag
 import scala.util.Random
 
-import org.scalatest.{Matchers, FunSuite}
+import org.apache.commons.io.IOUtils
+import org.scalatest.{BeforeAndAfterAll, Matchers, FunSuite}
 
 import org.apache.spark.serializer.{SerializationStream, DeserializationStream, SerializerInstance}
+import org.apache.spark.util.Utils
 
-class MultiBlockSerializerSuite extends FunSuite with Matchers {
+class MultiBlockSerializerSuite extends FunSuite with Matchers with BeforeAndAfterAll {
+
+  var rootDir: File = _
+  var testIdx = 0
+
+  override def beforeAll() {
+    super.beforeAll()
+    rootDir = Utils.createTempDir()
+  }
+
+  override def afterAll() {
+    super.afterAll()
+    Utils.deleteRecursively(rootDir)
+  }
 
   val rng = new Random()
   val data = Seq(3,3,3,3,10,5,4,1,1,10).map{length =>
@@ -35,11 +50,18 @@ class MultiBlockSerializerSuite extends FunSuite with Matchers {
     arr
   }
 
-  test("blockify") {
-    val ser = new MultiBlockSerializer(new DummySerializer, 10)
+  def nextTestFile: File = {
+    val f = new File(rootDir, testIdx.toString)
+    testIdx += 1
+    f
+  }
+
+
+  test("blockify to byte array") {
+    val ser = new MultiBlockByteArraySerializer(new DummySerializer, 10)
     data.foreach{arr => ser.writeObject(arr)}
 
-    ser.blockEndpoints should be (Seq(9, 12, 22, 32, 33))
+    ser.blockEndpoints should be (Seq(9, 12, 22, 32, 33, 43))
     val blocks = ser.toBlocks
     blocks.size should be (6)
     val exp = Seq(
@@ -56,15 +78,29 @@ class MultiBlockSerializerSuite extends FunSuite with Matchers {
     }
   }
 
+  test("blockify to file") {
+    val file = nextTestFile
+    val ser = new MultiBlockFileSerializer(new DummySerializer, file, 10)
+    data.foreach{arr => ser.writeObject(arr)}
+    ser.close()
+
+    ser.blockEndpoints should be (Seq(9, 12, 22, 32, 33, 43))
+    file.length() should be (43)
+    val in = new FileInputStream(file)
+    val readBytes = IOUtils.toByteArray(in)
+    in.close()
+    readBytes should be (data.reduce{_ ++ _})
+  }
+
   test("blockify with multiple chunks") {
     val chunkSize = 5
     val blockSize = 14
 
-    val ser = new MultiBlockSerializer(new DummySerializer, maxBlockSize = blockSize,
+    val ser = new MultiBlockByteArraySerializer(new DummySerializer, maxBlockSize = blockSize,
       chunkSize = chunkSize)
     data.foreach{arr => ser.writeObject(arr)}
 
-    ser.blockEndpoints should be (Seq(12, 22, 33))
+    ser.blockEndpoints should be (Seq(12, 22, 33, 43))
     val blocks = ser.toBlocks
     blocks.size should be (4)
     val exp = Seq(
@@ -80,8 +116,12 @@ class MultiBlockSerializerSuite extends FunSuite with Matchers {
   }
 
   test("error on records too large") {
-    def t(size: Int, maxSize: Int): String = {
-      val ser = new MultiBlockSerializer(new DummySerializer, maxSize)
+    def t(size: Int, maxSize: Int, file: Boolean): String = {
+      val ser = if (file) {
+        new MultiBlockFileSerializer(new DummySerializer, nextTestFile, maxSize)
+      } else {
+        new MultiBlockByteArraySerializer(new DummySerializer, maxSize)
+      }
 
       val exc = intercept[RecordTooLargeException]{
         val arr = new Array[Byte](size)
@@ -90,11 +130,13 @@ class MultiBlockSerializerSuite extends FunSuite with Matchers {
       exc.getMessage()
     }
 
-    t(5123, 2078) should
-      be ("Tried to write a record of size 5123 B, which exceeds the max size of 2078 B by 3.0 KB")
+    Seq(false, true).foreach{useFile =>
+      t(5123, 2078, useFile) should
+        be ("Tried to write a record of size 5123 B, which exceeds the max size of 2078 B by 3.0 KB")
 
-    t(5127, 5120) should
-      be ("Tried to write a record of size 5127 B, which exceeds the max size of 5120 B by 7.0 B")
+      t(5127, 5120, useFile) should
+        be ("Tried to write a record of size 5127 B, which exceeds the max size of 5120 B by 7.0 B")
+    }
   }
 }
 

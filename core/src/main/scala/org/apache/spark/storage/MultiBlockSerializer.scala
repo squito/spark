@@ -16,6 +16,8 @@
  */
 package org.apache.spark.storage
 
+import java.io.{FileOutputStream, BufferedOutputStream, File, OutputStream}
+
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
@@ -24,24 +26,17 @@ import org.apache.spark.serializer.{SerializerInstance, SerializationStream}
 import org.apache.spark.util.Utils
 import org.apache.spark.util.io.ByteArrayChunkOutputStream
 
-private[storage] class MultiBlockSerializer private[storage](
+private[storage] abstract class MultiBlockSerializer private[storage](
     baseSerializer: SerializerInstance,
     val maxBlockSize: Int,
-    val chunkSize: Int) extends SerializationStream {
+    val output: OutputStream) extends SerializationStream {
 
-  def this(baseSerializer: SerializerInstance, maxBlockSize: Int) = {
-    this(baseSerializer, maxBlockSize, 65536)
-  }
+  val out = new SizeTrackingOutputStream(output)
 
-  def this(baseSerializer: SerializerInstance) = {
-    this(baseSerializer, Integer.MAX_VALUE - 1e6.toInt)
-  }
-
-  private val out = new ByteArrayChunkOutputStream(chunkSize)
   private val stream = baseSerializer.serializeStream(out)
   private var lastBlockStart: Long = 0L
   private var lastRecordEnd: Long = 0L
-  val blockEndpoints = ArrayBuffer[Long]()
+  private val _blockEndpoints = ArrayBuffer[Long]()
 
   override def writeObject[T: ClassTag](t: T): SerializationStream = {
     stream.writeObject(t)
@@ -58,16 +53,53 @@ private[storage] class MultiBlockSerializer private[storage](
   }
 
   private def maybeUpdateBlockEndpoints(): Unit = {
-    if (out.size - lastBlockStart > maxBlockSize) {
+    val length = out.totalBytesWritten
+    if (length - lastBlockStart > maxBlockSize) {
       // we've overflowed the last block.  So make the last block start *before* the record
       // we just wrote
-      blockEndpoints += lastRecordEnd
+      _blockEndpoints += lastRecordEnd
       lastBlockStart = lastRecordEnd
-      if (out.size - lastRecordEnd > maxBlockSize) {
-        throw new RecordTooLargeException(out.size - lastRecordEnd, maxBlockSize)
+      if (length - lastRecordEnd > maxBlockSize) {
+        throw new RecordTooLargeException(length - lastRecordEnd, maxBlockSize)
       }
     }
-    lastRecordEnd = out.size
+    lastRecordEnd = length
+  }
+
+  def blockEndpoints: Seq[Long] = {
+    _blockEndpoints ++ Seq(out.totalBytesWritten)
+  }
+
+}
+
+private[storage] class MultiBlockFileSerializer private[storage](
+  baseSerializer: SerializerInstance,
+  file: File,
+  maxBlockSize: Int) extends MultiBlockSerializer(baseSerializer, maxBlockSize,
+  new BufferedOutputStream(new FileOutputStream(file))) {
+
+  def this(baseSerializer: SerializerInstance, file: File) = {
+    this(baseSerializer, file, Integer.MAX_VALUE - 1e6.toInt)
+  }
+
+}
+
+private[storage] class MultiBlockByteArraySerializer private[storage](
+  baseSerializer: SerializerInstance,
+  maxBlockSize: Int,
+  val bytes: ByteArrayChunkOutputStream) extends MultiBlockSerializer(baseSerializer, maxBlockSize,
+  bytes) {
+
+  def this(baseSerializer: SerializerInstance, maxBlockSize: Int, chunkSize: Int) = {
+    this(baseSerializer, maxBlockSize, new ByteArrayChunkOutputStream(chunkSize))
+  }
+
+  def this(baseSerializer: SerializerInstance, maxBlockSize: Int) = {
+    this(baseSerializer, maxBlockSize, 65536)
+  }
+
+  def this(baseSerializer: SerializerInstance) = {
+    this(baseSerializer, Integer.MAX_VALUE - 1e6.toInt)
   }
 
   //NOTE: requiring each block to be *one* Array[Byte] requires us to do an extra set of copying
@@ -75,8 +107,8 @@ private[storage] class MultiBlockSerializer private[storage](
   def toBlocks: Seq[Array[Byte]] = {
     val blocks = ArrayBuffer[Array[Byte]]()
     var prevEnd = 0L
-    (blockEndpoints.iterator ++ Iterator(out.size)).foreach{endpoint =>
-      blocks += out.slice(prevEnd, endpoint)
+    (blockEndpoints).foreach{endpoint =>
+      blocks += bytes.slice(prevEnd, endpoint)
       prevEnd = endpoint
     }
     blocks

@@ -89,11 +89,11 @@ private[spark] class TaskSetManager(
   val taskAttempts = Array.fill[List[TaskInfo]](numTasks)(Nil)
   var tasksSuccessful = 0
 
-  var weight = 1
-  var minShare = 0
-  var priority = taskSet.priority
-  var stageId = taskSet.stageId
-  var name = "TaskSet_" + taskSet.stageId.toString
+  val weight = 1
+  val minShare = 0
+  val priority = taskSet.priority
+  val stageId = taskSet.stageId
+  val name = "TaskSet_" + taskSet.stageId.toString
   var parent: Pool = null
   var totalResultSize = 0L
   var calculatedTasks = 0

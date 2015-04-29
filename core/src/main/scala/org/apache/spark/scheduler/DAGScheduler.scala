@@ -1037,10 +1037,11 @@ class DAGScheduler(
               if (shuffleStage.outputLocs.contains(Nil)) {
                 // Some tasks had failed; let's resubmit this shuffleStage
                 // TODO: Lower-level scheduler should also deal with this
+                val failedTasks = shuffleStage.outputLocs.zipWithIndex.filter(_._1.isEmpty)
+                  .map(_._2)
                 logInfo("Resubmitting " + shuffleStage + " (" + shuffleStage.name +
-                  ") because some of its tasks had failed: " +
-                  shuffleStage.outputLocs.zipWithIndex.filter(_._1.isEmpty)
-                      .map(_._2).mkString(", "))
+                  ") because " + failedTasks.size + " of its tasks had failed: " +
+                  failedTasks.mkString(", "))
                 submitStage(shuffleStage)
               } else {
                 val newlyRunnable = new ArrayBuffer[Stage]

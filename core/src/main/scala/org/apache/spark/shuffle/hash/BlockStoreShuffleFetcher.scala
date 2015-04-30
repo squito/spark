@@ -27,7 +27,10 @@ import org.apache.spark.shuffle.FetchFailedException
 import org.apache.spark.storage.{BlockId, BlockManagerId, ShuffleBlockFetcherIterator, ShuffleBlockId}
 import org.apache.spark.util.CompletionIterator
 
-private[hash] object BlockStoreShuffleFetcher extends Logging {
+object BlockStoreShuffleFetcher extends Logging {
+
+  val injectedFailureKey = "spark.test.fetchFailureInjectionRate"
+
   def fetch[T](
       shuffleId: Int,
       reduceId: Int,
@@ -58,6 +61,14 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
       val blockOption = blockPair._2
       blockOption match {
         case Success(block) => {
+          blockId match {
+            case ShuffleBlockId(shufId, mapId, _) =>
+              if (math.random < SparkEnv.get.conf.getDouble(injectedFailureKey, 0)) {
+                logWarning("simulating a fetch failure")
+                val address = statuses(mapId.toInt)._1
+                throw new FetchFailedException(address, shufId.toInt, mapId.toInt, reduceId, cause = new RuntimeException("simulated fetch failure"))
+            }
+          }
           block.asInstanceOf[Iterator[T]]
         }
         case Failure(e) => {

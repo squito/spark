@@ -26,11 +26,13 @@ import org.scalatest.concurrent.Timeouts
 import org.scalatest.time.SpanSugar._
 
 import org.apache.spark._
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{EmptyRDD, RDD}
 import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
+import org.apache.spark.shuffle.hash.BlockStoreShuffleFetcher
 import org.apache.spark.storage.{BlockId, BlockManagerId, BlockManagerMaster}
 import org.apache.spark.util.CallSite
 import org.apache.spark.executor.TaskMetrics
+import org.apache.sparktest.TestTags.ActiveTag
 
 class DAGSchedulerEventProcessLoopTester(dagScheduler: DAGScheduler)
   extends DAGSchedulerEventProcessLoop(dagScheduler) {
@@ -764,6 +766,24 @@ class DAGSchedulerSuite
     assert(accVal === 1)
 
     assertDataStructuresEmpty()
+  }
+
+  test("no concurrent retries for stage attempts", ActiveTag) {
+
+    val conf = new SparkConf().set("spark.executor.memory", "100m")
+//      .set(BlockStoreShuffleFetcher.injectedFailureKey, "0.001")
+    val clusterSc = new SparkContext("local-cluster[20,1,100]", "test-cluster", conf)
+    try {
+      val rawData = clusterSc.parallelize(1 to 1e6.toInt, 500).map{x => (x % 100) -> x}
+      val shuffled = rawData.groupByKey(50).mapPartitionsWithIndex { case (idx, itr) =>
+        //just need this to be slow
+        Thread.sleep(10000)
+        itr
+      }
+      val collected = shuffled.collect()
+    } finally {
+      clusterSc.stop()
+    }
   }
 
   /**

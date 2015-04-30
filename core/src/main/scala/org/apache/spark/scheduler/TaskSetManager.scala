@@ -769,7 +769,7 @@ private[spark] class TaskSetManager(
 
   /** Called by TaskScheduler when an executor is lost so we can re-enqueue our tasks */
   override def executorLost(execId: String, host: String) {
-    logInfo("Re-queueing tasks for " + execId + " from TaskSet " + taskSet.id)
+    logInfo("Re-queueing tasks for executor " + execId + " from TaskSet " + taskSet.id)
 
     // Re-enqueue pending tasks for this host based on the status of the cluster. Note
     // that it's okay if we add a task to the same queue twice (if it had multiple preferred

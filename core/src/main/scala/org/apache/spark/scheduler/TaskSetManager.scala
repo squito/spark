@@ -502,6 +502,10 @@ private[spark] class TaskSetManager(
 
   private def maybeFinishTaskSet() {
     if (isZombie && runningTasks == 0) {
+      try { throw new RuntimeException("finishing taskSet:")} catch {
+        case NonFatal(ex) =>
+          logWarning("Finishing taskSet " + taskSet + " at: ", ex)
+      }
       sched.taskSetFinished(this)
     }
   }
@@ -624,8 +628,8 @@ private[spark] class TaskSetManager(
       tasks(index), Success, result.value(), result.accumUpdates, info, result.metrics)
     if (!successful(index)) {
       tasksSuccessful += 1
-      logInfo("Finished task %s in stage %s (TID %d) in %d ms on %s (%d/%d)".format(
-        info.id, taskSet.id, info.taskId, info.duration, info.host, tasksSuccessful, numTasks))
+      logInfo("Finished task %s in stage %s (TID %d) in %d ms on %s (%d/%d).  runningTasks = %d".format(
+        info.id, taskSet.id, info.taskId, info.duration, info.host, tasksSuccessful, numTasks, runningTasks))
       // Mark successful and stop if all the tasks have succeeded.
       successful(index) = true
       if (tasksSuccessful == numTasks) {
@@ -655,7 +659,7 @@ private[spark] class TaskSetManager(
     var taskMetrics : TaskMetrics = null
 
     val failureReason = s"Lost task ${info.id} in stage ${taskSet.id} (TID $tid, ${info.host}): " +
-      reason.asInstanceOf[TaskFailedReason].toErrorString
+      reason.asInstanceOf[TaskFailedReason].toErrorString + ".  runningTasks = " + runningTasks
     reason match {
       case fetchFailed: FetchFailed =>
         logWarning(failureReason)

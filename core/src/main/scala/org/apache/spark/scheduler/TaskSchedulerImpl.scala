@@ -156,9 +156,38 @@ private[spark] class TaskSchedulerImpl(
   override def submitTasks(taskSet: TaskSet) {
     val tasks = taskSet.tasks
     logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks")
+    def pl(msg: String): Unit = {
+      println(msg)
+      logInfo(msg)
+    }
     this.synchronized {
       val manager = createTaskSetManager(taskSet, maxTaskFailures)
       activeTaskSets(taskSet.id) = manager
+      val setsGroupedByStage = activeTaskSets.toSeq.map { case (k,v) => v.taskSet.stageId -> v}
+        .groupBy(_._1).mapValues{attempts => attempts.map{_._2.taskSet}}
+      pl("after adding " + taskSet + ", active task sets: " + activeTaskSets.values.map{v => v.taskSet.id})
+      setsGroupedByStage.foreach { case (stage, attempts) =>
+        val attemptsStr = stage + ":" + attempts.map{_.attempt}.mkString("(", ",", ")")
+        pl(attemptsStr)
+        if (attempts.size > 1) {
+          val msg = "Multiple active attempts for stage: " + attemptsStr
+          logError(msg)
+          pl("******" + msg)
+          val partitionToAttempts = HashMap[Int, HashSet[Int]]()
+          attempts.foreach{ attempt =>
+            attempt.tasks.foreach { task =>
+              partitionToAttempts.getOrElseUpdate(task.partitionId, HashSet[Int]()) += attempt.attempt
+            }
+          }
+          val multiAttemptPartitions = partitionToAttempts.filter{_._2.size > 1}
+          if (multiAttemptPartitions.nonEmpty) {
+            val msg = s"${multiAttemptPartitions.size} partitions are being computed by multiple attempts"
+            logError(msg)
+            println(msg)
+          }
+
+        }
+      }
       schedulableBuilder.addTaskSetManager(manager, manager.taskSet.properties)
 
       if (!isLocal && !hasReceivedTask) {

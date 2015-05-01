@@ -771,16 +771,24 @@ class DAGSchedulerSuite
   test("no concurrent retries for stage attempts", ActiveTag) {
 
     val conf = new SparkConf().set("spark.executor.memory", "100m")
-//      .set(BlockStoreShuffleFetcher.injectedFailureKey, "0.001")
+      .set(BlockStoreShuffleFetcher.injectedFailureKey, "0.00005")
     val clusterSc = new SparkContext("local-cluster[20,1,100]", "test-cluster", conf)
     try {
       val rawData = clusterSc.parallelize(1 to 1e6.toInt, 500).map{x => (x % 100) -> x}
-      val shuffled = rawData.groupByKey(50).mapPartitionsWithIndex { case (idx, itr) =>
+      val shuffled = rawData.groupByKey(100).mapPartitions { itr =>
         //just need this to be slow
         Thread.sleep(10000)
-        itr
+        itr.map{x => ((x._1 + 5) % 100) -> x._2 }
       }
-      val collected = shuffled.collect()
+      val shuffledAgain = shuffled.flatMap{ case(k,vs) => vs.map{k -> _}}.groupByKey(100)
+      val data = shuffledAgain.mapPartitions { itr =>
+        Thread.sleep(10000)
+        itr.flatMap{_._2}
+      }.cache().collect()
+//      val count = shuffled.flatMap{_._2}.count()
+      println("count = " + data.size)
+      assert(data.size === 1e6.toInt)
+      assert(data.toSet === (1 to 1e6.toInt).toSet)
     } finally {
       clusterSc.stop()
     }

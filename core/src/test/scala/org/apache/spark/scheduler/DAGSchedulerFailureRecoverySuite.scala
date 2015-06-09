@@ -44,10 +44,18 @@ class DAGSchedulerFailureRecoverySuite extends SparkFunSuite with Logging {
       val clusterSc = new SparkContext("local-cluster[5,4,100]", "test-cluster", conf)
       val bms = ArrayBuffer[BlockManagerId]()
       val stageFailureCount = HashMap[Int, Int]()
+      val stageSubmissionCount = HashMap[Int, Int]()
       clusterSc.addSparkListener(new SparkListener {
         override def onBlockManagerAdded(bmAdded: SparkListenerBlockManagerAdded): Unit = {
           bms += bmAdded.blockManagerId
         }
+
+        override def onStageSubmitted(stageSubmited: SparkListenerStageSubmitted): Unit = {
+          val stage = stageSubmited.stageInfo.stageId
+          stageSubmissionCount(stage) = stageSubmissionCount.getOrElse(stage, 0) + 1
+          println("stage " + stage + " submitted: " + stageSubmissionCount(stage))
+        }
+
 
         override def onStageCompleted(stageCompleted: SparkListenerStageCompleted): Unit = {
           if (stageCompleted.stageInfo.failureReason.isDefined) {
@@ -74,6 +82,10 @@ class DAGSchedulerFailureRecoverySuite extends SparkFunSuite with Logging {
             if (idx == 0) {
               throw new FetchFailedException(someBlockManager, 0, 0, idx, stageAttemptId,
                 cause = new RuntimeException("simulated fetch failure"))
+            } else if (idx == 1) {
+              Thread.sleep(15000)
+              throw new FetchFailedException(someBlockManager, 0, 0, idx, stageAttemptId,
+                cause = new RuntimeException("simulated fetch failure"))
             } else if (idx > 0 && math.random < 0.2) {
               Thread.sleep(5000)
               throw new FetchFailedException(someBlockManager, 0, 0, idx, stageAttemptId,
@@ -87,7 +99,10 @@ class DAGSchedulerFailureRecoverySuite extends SparkFunSuite with Logging {
           itr.map { x => ((x._1 + 5) % 100) -> x._2 }
         }
         val shuffledAgain = shuffled.flatMap { case (k, vs) => vs.map(k -> _) }.groupByKey(100)
-        val data = shuffledAgain.mapPartitions { itr => itr.flatMap(_._2) }.cache().collect()
+        val data = shuffledAgain.mapPartitions { itr =>
+          Thread.sleep(15000)
+          itr.flatMap(_._2)
+        }.cache().collect()
         val count = data.size
         assert(count === 1e6.toInt)
         assert(data.toSet === (1 to 1e6.toInt).toSet)
@@ -95,6 +110,9 @@ class DAGSchedulerFailureRecoverySuite extends SparkFunSuite with Logging {
         assert(stageFailureCount.getOrElse(1, 0) === 0)
         assert(stageFailureCount.getOrElse(2, 0) == 1)
         assert(stageFailureCount.getOrElse(3, 0) == 0)
+        assert(stageSubmissionCount.getOrElse(1, 0) === 2)
+        assert(stageSubmissionCount.getOrElse(2, 0) == 2)
+        assert(stageSubmissionCount.getOrElse(3, 0) == 1)
       } finally {
         clusterSc.stop()
       }

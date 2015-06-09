@@ -72,11 +72,11 @@ class DAGSchedulerFailureRecoverySuite extends SparkFunSuite with Logging {
           val stageAttemptId = TaskContext.get().asInstanceOf[TaskContextImpl].stageAttemptId
           if (stageAttemptId == 0) {
             if (idx == 0) {
-              throw new FetchFailedException(someBlockManager, 0, 0, idx,
+              throw new FetchFailedException(someBlockManager, 0, 0, idx, stageAttemptId,
                 cause = new RuntimeException("simulated fetch failure"))
             } else if (idx > 0 && math.random < 0.2) {
               Thread.sleep(5000)
-              throw new FetchFailedException(someBlockManager, 0, 0, idx,
+              throw new FetchFailedException(someBlockManager, 0, 0, idx, stageAttemptId,
                 cause = new RuntimeException("simulated fetch failure"))
             } else {
               // want to make sure plenty of these finish after task 0 fails, and some even finish
@@ -86,7 +86,8 @@ class DAGSchedulerFailureRecoverySuite extends SparkFunSuite with Logging {
           }
           itr.map { x => ((x._1 + 5) % 100) -> x._2 }
         }
-        val data = shuffled.mapPartitions { itr => itr.flatMap(_._2) }.collect()
+        val shuffledAgain = shuffled.flatMap { case (k, vs) => vs.map(k -> _) }.groupByKey(100)
+        val data = shuffledAgain.mapPartitions { itr => itr.flatMap(_._2) }.cache().collect()
         val count = data.size
         assert(count === 1e6.toInt)
         assert(data.toSet === (1 to 1e6.toInt).toSet)

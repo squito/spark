@@ -25,9 +25,10 @@ import org.apache.commons.io.FileUtils
 import org.apache.commons.io.filefilter.TrueFileFilter
 import org.scalatest.BeforeAndAfterAll
 
-import org.apache.spark.{HashPartitioner, ShuffleDependency, SparkContext, ShuffleSuite}
+import org.apache.spark._
 import org.apache.spark.rdd.ShuffledRDD
 import org.apache.spark.serializer.{JavaSerializer, KryoSerializer}
+import org.apache.spark.shuffle.ShuffleSuite
 import org.apache.spark.util.Utils
 
 class UnsafeShuffleSuite extends ShuffleSuite with BeforeAndAfterAll {
@@ -39,6 +40,24 @@ class UnsafeShuffleSuite extends ShuffleSuite with BeforeAndAfterAll {
     // UnsafeShuffleManager requires at least 128 MB of memory per task in order to be able to sort
     // shuffle records.
     conf.set("spark.shuffle.memoryFraction", "0.5")
+  }
+
+  override def multipleAttemptConfs: Seq[(String, SparkConf)] = {
+    // unsafe shuffle has a few different code paths, based on various configs.  We want to
+    // make sure we stress multiple attempts under all variants
+    val kryoAndNoSpillMove = conf.clone()
+      .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .set("spark.shuffle.unsafe.testing.allowSpillMove", "false")
+    val noCompressionFileMerge = kryoAndNoSpillMove.clone()
+      .set("spark.shuffle.compress", "false")
+      .set("spark.file.transferTo", "false")
+    val noCompressionTransferTo = noCompressionFileMerge.clone()
+      .set("spark.file.transferTo", "true")
+    Seq(
+      "slow merge path" -> kryoAndNoSpillMove,
+      "filestream based fast merge" -> noCompressionFileMerge,
+      "transferTo based fast merge" -> noCompressionTransferTo
+    )
   }
 
   test("UnsafeShuffleManager properly cleans up files for shuffles that use the new shuffle path") {

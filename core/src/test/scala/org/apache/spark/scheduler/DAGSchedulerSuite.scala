@@ -476,7 +476,7 @@ class DAGSchedulerSuite
     complete(taskSets(0), Seq(
         (Success, makeMapStatus("hostA", 1)),
         (Success, makeMapStatus("hostB", 1))))
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1) ===
+    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_.bmId) ===
            Array(makeBlockManagerId("hostA"), makeBlockManagerId("hostB")))
     complete(taskSets(1), Seq((Success, 42)))
     assert(results === Map(0 -> 42))
@@ -503,7 +503,7 @@ class DAGSchedulerSuite
     // have the 2nd attempt pass
     complete(taskSets(2), Seq((Success, makeMapStatus("hostA", 1))))
     // we can see both result blocks now
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1.host) ===
+    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_.bmId.host) ===
       Array("hostA", "hostB"))
     complete(taskSets(3), Seq((Success, 43)))
     assert(results === Map(0 -> 42, 1 -> 43))
@@ -520,7 +520,7 @@ class DAGSchedulerSuite
       (Success, makeMapStatus("hostA", 1)),
       (Success, makeMapStatus("hostB", 1))))
     // The MapOutputTracker should know about both map output locations.
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1.host) ===
+    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_.bmId.host) ===
       Array("hostA", "hostB"))
 
     // The first result task fails, with a fetch failure for the output from the first mapper.
@@ -572,7 +572,7 @@ class DAGSchedulerSuite
     taskSet.tasks(1).epoch = newEpoch
     runEvent(CompletionEvent(
       taskSet.tasks(1), Success, makeMapStatus("hostA", 1), null, createFakeTaskInfo(), null))
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1) ===
+    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_.bmId) ===
            Array(makeBlockManagerId("hostB"), makeBlockManagerId("hostA")))
     complete(taskSets(1), Seq((Success, 42), (Success, 43)))
     assert(results === Map(0 -> 42, 1 -> 43))
@@ -668,7 +668,7 @@ class DAGSchedulerSuite
        (Success, makeMapStatus("hostB", 1))))
     // have hostC complete the resubmitted task
     complete(taskSets(1), Seq((Success, makeMapStatus("hostC", 1))))
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1) ===
+    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_.bmId) ===
            Array(makeBlockManagerId("hostC"), makeBlockManagerId("hostB")))
     complete(taskSets(2), Seq((Success, 42)))
     assert(results === Map(0 -> 42))
@@ -812,7 +812,7 @@ class DAGSchedulerSuite
   }
 
   private def makeMapStatus(host: String, reduces: Int): MapStatus =
-    MapStatus(makeBlockManagerId(host), Array.fill[Long](reduces)(2))
+    MapStatus(makeBlockManagerId(host), 0, Array.fill[Long](reduces)(2))
 
   private def makeBlockManagerId(host: String): BlockManagerId =
     BlockManagerId("exec-" + host, host, 12345)

@@ -36,6 +36,13 @@ private[spark] case class GetMapOutputStatuses(shuffleId: Int)
   extends MapOutputTrackerMessage
 private[spark] case object StopMapOutputTracker extends MapOutputTrackerMessage
 
+/**
+ * Metadata used on the shuffle-read side to know where to find the data from the map side.
+ * This corresponds to one map partition and one reduce partition, though those partitions
+ * are not explicitly represented -- users must know from context.
+ */
+private[spark] case class ServerAttemptSize(bmId: BlockManagerId, stageAttempt: Int, size: Long)
+
 /** RpcEndpoint class for MapOutputTrackerMaster */
 private[spark] class MapOutputTrackerMasterEndpoint(
     override val rpcEnv: RpcEnv, tracker: MapOutputTrackerMaster, conf: SparkConf)
@@ -127,7 +134,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
    * Called from executors to get the server URIs and output sizes of the map outputs of
    * a given shuffle.
    */
-  def getServerStatuses(shuffleId: Int, reduceId: Int): Array[(BlockManagerId, Long)] = {
+  def getServerStatuses(shuffleId: Int, reduceId: Int): Array[ServerAttemptSize] = {
     val statuses = mapStatuses.get(shuffleId).orNull
     if (statuses == null) {
       logInfo("Don't have map outputs for shuffle " + shuffleId + ", fetching them")
@@ -380,16 +387,18 @@ private[spark] object MapOutputTracker extends Logging {
   private def convertMapStatuses(
       shuffleId: Int,
       reduceId: Int,
-      statuses: Array[MapStatus]): Array[(BlockManagerId, Long)] = {
+      statuses: Array[MapStatus]): Array[ServerAttemptSize] = {
     assert (statuses != null)
     statuses.map {
       status =>
         if (status == null) {
-          logError("Missing an output location for shuffle " + shuffleId)
-          throw new MetadataFetchFailedException(
-            shuffleId, reduceId, "Missing an output location for shuffle " + shuffleId)
+          val missing = statuses.iterator.zipWithIndex.filter{_._1 == null}.map{_._2}.mkString(",")
+          val msg = "Missing an output location for shuffle =" + shuffleId + "; mapIds =" + missing
+          logError(msg)
+          throw new MetadataFetchFailedException(shuffleId, reduceId, msg)
         } else {
-          (status.location, status.getSizeForBlock(reduceId))
+          ServerAttemptSize(
+            status.location, status.stageAttemptId, status.getSizeForBlock(reduceId))
         }
     }
   }

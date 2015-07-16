@@ -191,7 +191,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
       for (task <- tasks.flatten) {
         val serializedTask = ser.serialize(task)
         if (serializedTask.limit >= akkaFrameSize - AkkaUtils.reservedSizeBytes) {
-          scheduler.taskSetManagerForTask(task.taskId).foreach { taskSet =>
+          scheduler.taskIdToTaskSet.get(task.taskId).foreach { taskSet =>
             try {
               var msg = "Serialized task %s:%d was %d bytes, which exceeds max allowed: " +
                 "spark.akka.frameSize (%d bytes) - reserved (%d bytes). Consider increasing " +

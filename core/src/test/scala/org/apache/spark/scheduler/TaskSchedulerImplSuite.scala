@@ -52,6 +52,7 @@ class TaskSchedulerImplSuite extends SparkFunSuite with LocalSparkContext with L
       taskScheduler.submitTasks(taskSet)
       val taskDescriptions = taskScheduler.resourceOffers(workerOffers).flatten
       assert(1 === taskDescriptions.length)
+      taskScheduler.taskSetFinished(taskScheduler.stageIdToLatestTaskSet(taskSet.stageId))
       taskDescriptions(0).executorId
     }
     val count = selectedExecutorIds.count(_ == workerOffers(0).executorId)
@@ -78,6 +79,7 @@ class TaskSchedulerImplSuite extends SparkFunSuite with LocalSparkContext with L
     taskScheduler.submitTasks(taskSet)
     var taskDescriptions = taskScheduler.resourceOffers(zeroCoreWorkerOffers).flatten
     assert(0 === taskDescriptions.length)
+    taskScheduler.taskSetFinished(taskScheduler.stageIdToLatestTaskSet(taskSet.stageId))
 
     // No tasks should run as we only have 1 core free.
     val numFreeCores = 1
@@ -86,6 +88,7 @@ class TaskSchedulerImplSuite extends SparkFunSuite with LocalSparkContext with L
     taskScheduler.submitTasks(taskSet)
     taskDescriptions = taskScheduler.resourceOffers(singleCoreWorkerOffers).flatten
     assert(0 === taskDescriptions.length)
+    taskScheduler.taskSetFinished(taskScheduler.stageIdToLatestTaskSet(taskSet.stageId))
 
     // Now change the offers to have 2 cores in one executor and verify if it
     // is chosen.
@@ -123,6 +126,7 @@ class TaskSchedulerImplSuite extends SparkFunSuite with LocalSparkContext with L
     // Even if one of the tasks has not-serializable tasks, the other task set should
     // still be processed without error
     taskScheduler.submitTasks(taskSet)
+    taskScheduler.taskSetFinished(taskScheduler.stageIdToLatestTaskSet(taskSet.stageId))
     taskScheduler.submitTasks(FakeTask.createTaskSet(1))
     taskDescriptions = taskScheduler.resourceOffers(multiCoreWorkerOffers).flatten
     assert(taskDescriptions.map(_.executorId) === Seq("executor0"))
@@ -144,13 +148,11 @@ class TaskSchedulerImplSuite extends SparkFunSuite with LocalSparkContext with L
     intercept[IllegalStateException] { taskScheduler.submitTasks(attempt2) }
 
     // OK to submit multiple if previous attempts are all zombie
-    taskScheduler.taskSetManagerForAttempt(attempt1.stageId, attempt1.stageAttemptId)
-      .get.isZombie = true
+    taskScheduler.stageIdToLatestTaskSet(attempt1.stageId).isZombie = true
     taskScheduler.submitTasks(attempt2)
     val attempt3 = FakeTask.createTaskSet(1, 2)
     intercept[IllegalStateException] { taskScheduler.submitTasks(attempt3) }
-    taskScheduler.taskSetManagerForAttempt(attempt2.stageId, attempt2.stageAttemptId)
-      .get.isZombie = true
+    taskScheduler.stageIdToLatestTaskSet(attempt2.stageId).isZombie = true
     taskScheduler.submitTasks(attempt3)
   }
 
@@ -174,8 +176,7 @@ class TaskSchedulerImplSuite extends SparkFunSuite with LocalSparkContext with L
     assert(1 === taskDescriptions.length)
 
     // now mark attempt 1 as a zombie
-    taskScheduler.taskSetManagerForAttempt(attempt1.stageId, attempt1.stageAttemptId)
-      .get.isZombie = true
+    taskScheduler.stageIdToLatestTaskSet(attempt1.stageId).isZombie = true
 
     // don't schedule anything on another resource offer
     val taskDescriptions2 = taskScheduler.resourceOffers(workerOffers).flatten
@@ -188,7 +189,7 @@ class TaskSchedulerImplSuite extends SparkFunSuite with LocalSparkContext with L
     taskScheduler.submitTasks(attempt2)
     val taskDescriptions3 = taskScheduler.resourceOffers(workerOffers).flatten
     assert(1 === taskDescriptions3.length)
-    val mgr = taskScheduler.taskSetManagerForTask(taskDescriptions3(0).taskId).get
+    val mgr = taskScheduler.taskIdToTaskSet(taskDescriptions3(0).taskId)
     assert(mgr.taskSet.stageAttemptId === 1)
   }
 
@@ -212,7 +213,7 @@ class TaskSchedulerImplSuite extends SparkFunSuite with LocalSparkContext with L
     assert(10 === taskDescriptions.length)
 
     // now mark attempt 1 as a zombie
-    val mgr1 = taskScheduler.taskSetManagerForAttempt(attempt1.stageId, attempt1.stageAttemptId).get
+    val mgr1 = taskScheduler.stageIdToLatestTaskSet(attempt1.stageId)
     mgr1.isZombie = true
 
     // don't schedule anything on another resource offer
@@ -232,7 +233,7 @@ class TaskSchedulerImplSuite extends SparkFunSuite with LocalSparkContext with L
     assert(10 === taskDescriptions3.length)
 
     taskDescriptions3.foreach{ task =>
-      val mgr = taskScheduler.taskSetManagerForTask(task.taskId).get
+      val mgr = taskScheduler.taskIdToTaskSet(task.taskId)
       assert(mgr.taskSet.stageAttemptId === 1)
     }
   }

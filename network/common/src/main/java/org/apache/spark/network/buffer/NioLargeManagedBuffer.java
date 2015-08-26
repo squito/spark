@@ -29,7 +29,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A {@link org.apache.spark.network.buffer.ManagedBuffer} backed by {@link java.nio.ByteBuffer}.
+ * A {@link org.apache.spark.network.buffer.LargeManagedBuffer} backed by
+ * {@link org.apache.spark.network.buffer.LargeByteBuffer}.
  */
 public final class NioLargeManagedBuffer extends LargeManagedBuffer {
   private final LargeByteBuffer buf;
@@ -66,7 +67,8 @@ public final class NioLargeManagedBuffer extends LargeManagedBuffer {
   @Override
   public List<? extends Object> convertToNetty() throws IOException {
     List<ByteBuf> nettyBufs = new ArrayList<ByteBuf>();
-    for(ByteBuffer bb: buf.nioBuffers()) {
+    // TODO should work for any LargeByteBuffer!
+    for(ByteBuffer bb: ((WrappedLargeByteBuffer) buf).nioBuffers()) {
       nettyBufs.add(Unpooled.wrappedBuffer(bb));
     }
     return nettyBufs;

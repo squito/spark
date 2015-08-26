@@ -9,7 +9,7 @@ displayTitle: <a href="mllib-guide.html">MLlib</a> - Ensembles
 
 An [ensemble method](http://en.wikipedia.org/wiki/Ensemble_learning)
 is a learning algorithm which creates a model composed of a set of other base models.
-MLlib supports two major ensemble algorithms: [`GradientBoostedTrees`](api/scala/index.html#org.apache.spark.mllib.tree.GradientBosotedTrees) and [`RandomForest`](api/scala/index.html#org.apache.spark.mllib.tree.RandomForest).
+MLlib supports two major ensemble algorithms: [`GradientBoostedTrees`](api/scala/index.html#org.apache.spark.mllib.tree.GradientBoostedTrees) and [`RandomForest`](api/scala/index.html#org.apache.spark.mllib.tree.RandomForest).
 Both use [decision trees](mllib-decision-tree.html) as their base models.
 
 ## Gradient-Boosted Trees vs. Random Forests
@@ -464,8 +464,8 @@ first one being the training dataset and the second being the validation dataset
 The training is stopped when the improvement in the validation error is not more than a certain tolerance
 (supplied by the `validationTol` argument in `BoostingStrategy`). In practice, the validation error
 decreases initially and later increases. There might be cases in which the validation error does not change monotonically,
-and the user is advised to set a large enough negative tolerance and examine the validation curve to to tune the number of
-iterations.
+and the user is advised to set a large enough negative tolerance and examine the validation curve using `evaluateEachIteration`
+(which gives the error or loss per iteration) to tune the number of iterations.
 
 ### Examples
 

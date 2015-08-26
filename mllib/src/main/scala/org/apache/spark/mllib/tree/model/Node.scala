@@ -38,6 +38,7 @@ import org.apache.spark.mllib.linalg.Vector
  * @param leftNode  left child
  * @param rightNode right child
  * @param stats information gain stats
+ * @since 1.0.0
  */
 @DeveloperApi
 class Node (
@@ -50,12 +51,15 @@ class Node (
     var rightNode: Option[Node],
     var stats: Option[InformationGainStats]) extends Serializable with Logging {
 
-  override def toString = "id = " + id + ", isLeaf = " + isLeaf + ", predict = " + predict + ", " +
-    "impurity =  " + impurity + "split = " + split + ", stats = " + stats
+  override def toString: String = {
+    s"id = $id, isLeaf = $isLeaf, predict = $predict, impurity = $impurity, " +
+      s"split = $split, stats = $stats"
+  }
 
   /**
    * build the left node and right nodes if not leaf
    * @param nodes array of nodes
+   * @since 1.0.0
    */
   @deprecated("build should no longer be used since trees are constructed on-the-fly in training",
     "1.2.0")
@@ -77,11 +81,12 @@ class Node (
    * predict value if node is not leaf
    * @param features feature value
    * @return predicted value
+   * @since 1.1.0
    */
   def predict(features: Vector) : Double = {
     if (isLeaf) {
       predict.predict
-    } else{
+    } else {
       if (split.get.featureType == Continuous) {
         if (features(split.get.feature) <= split.get.threshold) {
           leftNode.get.predict(features)
@@ -149,9 +154,9 @@ class Node (
           s"(feature ${split.feature} > ${split.threshold})"
         }
         case Categorical => if (left) {
-          s"(feature ${split.feature} in ${split.categories.mkString("{",",","}")})"
+          s"(feature ${split.feature} in ${split.categories.mkString("{", ",", "}")})"
         } else {
-          s"(feature ${split.feature} not in ${split.categories.mkString("{",",","}")})"
+          s"(feature ${split.feature} not in ${split.categories.mkString("{", ",", "}")})"
         }
       }
     }
@@ -159,9 +164,9 @@ class Node (
     if (isLeaf) {
       prefix + s"Predict: ${predict.predict}\n"
     } else {
-      prefix + s"If ${splitToString(split.get, left=true)}\n" +
+      prefix + s"If ${splitToString(split.get, left = true)}\n" +
         leftNode.get.subtreeToString(indentFactor + 1) +
-        prefix + s"Else ${splitToString(split.get, left=false)}\n" +
+        prefix + s"Else ${splitToString(split.get, left = false)}\n" +
         rightNode.get.subtreeToString(indentFactor + 1)
     }
   }
@@ -173,7 +178,7 @@ class Node (
   }
 }
 
-private[tree] object Node {
+private[spark] object Node {
 
   /**
    * Return a node with the given node id (but nothing else set).

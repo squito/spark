@@ -25,6 +25,7 @@ import org.apache.spark.annotation.{DeveloperApi, Experimental}
  * This trait is used for
  *  (a) setting the impurity parameter in [[org.apache.spark.mllib.tree.configuration.Strategy]]
  *  (b) calculating impurity values from sufficient statistics.
+ *  @since 1.0.0
  */
 @Experimental
 trait Impurity extends Serializable {
@@ -35,6 +36,7 @@ trait Impurity extends Serializable {
    * @param counts Array[Double] with counts for each label
    * @param totalCount sum of counts for all labels
    * @return information value, or 0 if totalCount = 0
+   * @since 1.1.0
    */
   @DeveloperApi
   def calculate(counts: Array[Double], totalCount: Double): Double
@@ -46,6 +48,7 @@ trait Impurity extends Serializable {
    * @param sum sum of labels
    * @param sumSquares summation of squares of the labels
    * @return information value, or 0 if count = 0
+   * @since 1.0.0
    */
   @DeveloperApi
   def calculate(count: Double, sum: Double, sumSquares: Double): Double
@@ -57,7 +60,7 @@ trait Impurity extends Serializable {
  * Note: Instances of this class do not hold the data; they operate on views of the data.
  * @param statsSize  Length of the vector of sufficient statistics for one bin.
  */
-private[tree] abstract class ImpurityAggregator(val statsSize: Int) extends Serializable {
+private[spark] abstract class ImpurityAggregator(val statsSize: Int) extends Serializable {
 
   /**
    * Merge the stats from one bin into another.
@@ -95,7 +98,7 @@ private[tree] abstract class ImpurityAggregator(val statsSize: Int) extends Seri
  * (node, feature, bin).
  * @param stats  Array of sufficient statistics for a (node, feature, bin).
  */
-private[tree] abstract class ImpurityCalculator(val stats: Array[Double]) {
+private[spark] abstract class ImpurityCalculator(val stats: Array[Double]) extends Serializable {
 
   /**
    * Make a deep copy of this [[ImpurityCalculator]].
@@ -111,11 +114,12 @@ private[tree] abstract class ImpurityCalculator(val stats: Array[Double]) {
    * Add the stats from another calculator into this one, modifying and returning this calculator.
    */
   def add(other: ImpurityCalculator): ImpurityCalculator = {
-    require(stats.size == other.stats.size,
+    require(stats.length == other.stats.length,
       s"Two ImpurityCalculator instances cannot be added with different counts sizes." +
-        s"  Sizes are ${stats.size} and ${other.stats.size}.")
+        s"  Sizes are ${stats.length} and ${other.stats.length}.")
     var i = 0
-    while (i < other.stats.size) {
+    val len = other.stats.length
+    while (i < len) {
       stats(i) += other.stats(i)
       i += 1
     }
@@ -127,11 +131,12 @@ private[tree] abstract class ImpurityCalculator(val stats: Array[Double]) {
    * calculator.
    */
   def subtract(other: ImpurityCalculator): ImpurityCalculator = {
-    require(stats.size == other.stats.size,
+    require(stats.length == other.stats.length,
       s"Two ImpurityCalculator instances cannot be subtracted with different counts sizes." +
-      s"  Sizes are ${stats.size} and ${other.stats.size}.")
+      s"  Sizes are ${stats.length} and ${other.stats.length}.")
     var i = 0
-    while (i < other.stats.size) {
+    val len = other.stats.length
+    while (i < len) {
       stats(i) -= other.stats(i)
       i += 1
     }

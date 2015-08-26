@@ -3,16 +3,37 @@ layout: global
 title: Spark ML Programming Guide
 ---
 
-`spark.ml` is a new package introduced in Spark 1.2, which aims to provide a uniform set of
+`\[
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\x}{\mathbf{x}}
+\newcommand{\y}{\mathbf{y}}
+\newcommand{\wv}{\mathbf{w}}
+\newcommand{\av}{\mathbf{\alpha}}
+\newcommand{\bv}{\mathbf{b}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\id}{\mathbf{I}}
+\newcommand{\ind}{\mathbf{1}}
+\newcommand{\0}{\mathbf{0}}
+\newcommand{\unit}{\mathbf{e}}
+\newcommand{\one}{\mathbf{1}}
+\newcommand{\zero}{\mathbf{0}}
+\]`
+
+
+Spark 1.2 introduced a new package called `spark.ml`, which aims to provide a uniform set of
 high-level APIs that help users create and tune practical machine learning pipelines.
-It is currently an alpha component, and we would like to hear back from the community about
-how it fits real-world use cases and how it could be improved.
+
+*Graduated from Alpha!*  The Pipelines API is no longer an alpha component, although many elements of it are still `Experimental` or `DeveloperApi`.
 
 Note that we will keep supporting and adding features to `spark.mllib` along with the
 development of `spark.ml`.
 Users should be comfortable using `spark.mllib` features and expect more features coming.
 Developers should contribute new algorithms to `spark.mllib` and can optionally contribute
 to `spark.ml`.
+
+See the [Algorithm Guides section](#algorithm-guides) below for guides on sub-packages of `spark.ml`, including feature transformers unique to the Pipelines API, ensembles, and more.
+
 
 **Table of Contents**
 
@@ -148,6 +169,17 @@ Parameters belong to specific instances of `Estimator`s and `Transformer`s.
 For example, if we have two `LogisticRegression` instances `lr1` and `lr2`, then we can build a `ParamMap` with both `maxIter` parameters specified: `ParamMap(lr1.maxIter -> 10, lr2.maxIter -> 20)`.
 This is useful if there are two algorithms with the `maxIter` parameter in a `Pipeline`.
 
+# Algorithm Guides
+
+There are now several algorithms in the Pipelines API which are not in the lower-level MLlib API, so we link to documentation for them here.  These algorithms are mostly feature transformers, which fit naturally into the `Transformer` abstraction in Pipelines, and ensembles, which fit naturally into the `Estimator` abstraction in the Pipelines.
+
+**Pipelines API Algorithm Guides**
+
+* [Feature Extraction, Transformation, and Selection](ml-features.html)
+* [Decision Trees for Classification and Regression](ml-decision-tree.html)
+* [Ensembles](ml-ensembles.html)
+* [Linear methods with elastic net regularization](ml-linear-methods.html)
+
 # Code Examples
 
 This section gives code examples illustrating the functionality discussed above.
@@ -197,7 +229,7 @@ val model1 = lr.fit(training.toDF)
 // we can view the parameters it used during fit().
 // This prints the parameter (name: value) pairs, where names are unique IDs for this
 // LogisticRegression instance.
-println("Model 1 was fit using parameters: " + model1.fittingParamMap)
+println("Model 1 was fit using parameters: " + model1.parent.extractParamMap)
 
 // We may alternatively specify parameters using a ParamMap,
 // which supports several methods for specifying parameters.
@@ -212,7 +244,7 @@ val paramMapCombined = paramMap ++ paramMap2
 // Now learn a new model using the paramMapCombined parameters.
 // paramMapCombined overrides all parameters set earlier via lr.set* methods.
 val model2 = lr.fit(training.toDF, paramMapCombined)
-println("Model 2 was fit using parameters: " + model2.fittingParamMap)
+println("Model 2 was fit using parameters: " + model2.parent.extractParamMap)
 
 // Prepare test data.
 val test = sc.parallelize(Seq(
@@ -228,7 +260,7 @@ model2.transform(test.toDF)
   .select("features", "label", "myProbability", "prediction")
   .collect()
   .foreach { case Row(features: Vector, label: Double, prob: Vector, prediction: Double) =>
-    println("($features, $label) -> prob=$prob, prediction=$prediction")
+    println(s"($features, $label) -> prob=$prob, prediction=$prediction")
   }
 
 sc.stop()
@@ -237,8 +269,9 @@ sc.stop()
 
 <div data-lang="java">
 {% highlight java %}
+import java.util.Arrays;
 import java.util.List;
-import com.google.common.collect.Lists;
+
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.ml.classification.LogisticRegressionModel;
@@ -257,7 +290,7 @@ SQLContext jsql = new SQLContext(jsc);
 // Prepare training data.
 // We use LabeledPoint, which is a JavaBean.  Spark SQL can convert RDDs of JavaBeans
 // into DataFrames, where it uses the bean metadata to infer the schema.
-List<LabeledPoint> localTraining = Lists.newArrayList(
+List<LabeledPoint> localTraining = Arrays.asList(
   new LabeledPoint(1.0, Vectors.dense(0.0, 1.1, 0.1)),
   new LabeledPoint(0.0, Vectors.dense(2.0, 1.0, -1.0)),
   new LabeledPoint(0.0, Vectors.dense(2.0, 1.3, 1.0)),
@@ -279,7 +312,7 @@ LogisticRegressionModel model1 = lr.fit(training);
 // we can view the parameters it used during fit().
 // This prints the parameter (name: value) pairs, where names are unique IDs for this
 // LogisticRegression instance.
-System.out.println("Model 1 was fit using parameters: " + model1.fittingParamMap());
+System.out.println("Model 1 was fit using parameters: " + model1.parent().extractParamMap());
 
 // We may alternatively specify parameters using a ParamMap.
 ParamMap paramMap = new ParamMap();
@@ -295,10 +328,10 @@ ParamMap paramMapCombined = paramMap.$plus$plus(paramMap2);
 // Now learn a new model using the paramMapCombined parameters.
 // paramMapCombined overrides all parameters set earlier via lr.set* methods.
 LogisticRegressionModel model2 = lr.fit(training, paramMapCombined);
-System.out.println("Model 2 was fit using parameters: " + model2.fittingParamMap());
+System.out.println("Model 2 was fit using parameters: " + model2.parent().extractParamMap());
 
 // Prepare test documents.
-List<LabeledPoint> localTest = Lists.newArrayList(
+List<LabeledPoint> localTest = Arrays.asList(
     new LabeledPoint(1.0, Vectors.dense(-1.0, 1.5, 1.3)),
     new LabeledPoint(0.0, Vectors.dense(3.0, 2.0, -0.1)),
     new LabeledPoint(1.0, Vectors.dense(0.0, 2.2, -1.5)));
@@ -315,6 +348,74 @@ for (Row r: results.select("features", "label", "myProbability", "prediction").c
 }
 
 jsc.stop();
+{% endhighlight %}
+</div>
+
+<div data-lang="python">
+{% highlight python %}
+from pyspark import SparkContext
+from pyspark.mllib.regression import LabeledPoint
+from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.param import Param, Params
+from pyspark.sql import Row, SQLContext
+
+sc = SparkContext(appName="SimpleParamsExample")
+sqlContext = SQLContext(sc)
+
+# Prepare training data.
+# We use LabeledPoint.
+# Spark SQL can convert RDDs of LabeledPoints into DataFrames.
+training = sc.parallelize([LabeledPoint(1.0, [0.0, 1.1,  0.1]),
+                           LabeledPoint(0.0, [2.0, 1.0, -1.0]),
+                           LabeledPoint(0.0, [2.0, 1.3,  1.0]),
+                           LabeledPoint(1.0, [0.0, 1.2, -0.5])])
+
+# Create a LogisticRegression instance. This instance is an Estimator.
+lr = LogisticRegression(maxIter=10, regParam=0.01)
+# Print out the parameters, documentation, and any default values.
+print "LogisticRegression parameters:\n" + lr.explainParams() + "\n"
+
+# Learn a LogisticRegression model. This uses the parameters stored in lr.
+model1 = lr.fit(training.toDF())
+
+# Since model1 is a Model (i.e., a transformer produced by an Estimator),
+# we can view the parameters it used during fit().
+# This prints the parameter (name: value) pairs, where names are unique IDs for this
+# LogisticRegression instance.
+print "Model 1 was fit using parameters: "
+print model1.extractParamMap()
+
+# We may alternatively specify parameters using a Python dictionary as a paramMap
+paramMap = {lr.maxIter: 20}
+paramMap[lr.maxIter] = 30 # Specify 1 Param, overwriting the original maxIter.
+paramMap.update({lr.regParam: 0.1, lr.threshold: 0.55}) # Specify multiple Params.
+
+# You can combine paramMaps, which are python dictionaries.
+paramMap2 = {lr.probabilityCol: "myProbability"} # Change output column name
+paramMapCombined = paramMap.copy()
+paramMapCombined.update(paramMap2)
+
+# Now learn a new model using the paramMapCombined parameters.
+# paramMapCombined overrides all parameters set earlier via lr.set* methods.
+model2 = lr.fit(training.toDF(), paramMapCombined)
+print "Model 2 was fit using parameters: "
+print model2.extractParamMap()
+
+# Prepare test data
+test = sc.parallelize([LabeledPoint(1.0, [-1.0, 1.5,  1.3]),
+                       LabeledPoint(0.0, [ 3.0, 2.0, -0.1]),
+                       LabeledPoint(1.0, [ 0.0, 2.2, -1.5])])
+
+# Make predictions on test data using the Transformer.transform() method.
+# LogisticRegression.transform will only use the 'features' column.
+# Note that model2.transform() outputs a "myProbability" column instead of the usual
+# 'probability' column since we renamed the lr.probabilityCol parameter previously.
+prediction = model2.transform(test.toDF())
+selected = prediction.select("features", "label", "myProbability", "prediction")
+for row in selected.collect():
+    print row
+
+sc.stop()
 {% endhighlight %}
 </div>
 
@@ -382,7 +483,7 @@ model.transform(test.toDF)
   .select("id", "text", "probability", "prediction")
   .collect()
   .foreach { case Row(id: Long, text: String, prob: Vector, prediction: Double) =>
-    println("($id, $text) --> prob=$prob, prediction=$prediction")
+    println(s"($id, $text) --> prob=$prob, prediction=$prediction")
   }
 
 sc.stop()
@@ -391,8 +492,9 @@ sc.stop()
 
 <div data-lang="java">
 {% highlight java %}
+import java.util.Arrays;
 import java.util.List;
-import com.google.common.collect.Lists;
+
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.ml.Pipeline;
@@ -408,31 +510,31 @@ import org.apache.spark.sql.SQLContext;
 // Labeled and unlabeled instance types.
 // Spark SQL can infer schema from Java Beans.
 public class Document implements Serializable {
-  private Long id;
+  private long id;
   private String text;
 
-  public Document(Long id, String text) {
+  public Document(long id, String text) {
     this.id = id;
     this.text = text;
   }
 
-  public Long getId() { return this.id; }
-  public void setId(Long id) { this.id = id; }
+  public long getId() { return this.id; }
+  public void setId(long id) { this.id = id; }
 
   public String getText() { return this.text; }
   public void setText(String text) { this.text = text; }
 }
 
 public class LabeledDocument extends Document implements Serializable {
-  private Double label;
+  private double label;
 
-  public LabeledDocument(Long id, String text, Double label) {
+  public LabeledDocument(long id, String text, double label) {
     super(id, text);
     this.label = label;
   }
 
-  public Double getLabel() { return this.label; }
-  public void setLabel(Double label) { this.label = label; }
+  public double getLabel() { return this.label; }
+  public void setLabel(double label) { this.label = label; }
 }
 
 // Set up contexts.
@@ -441,7 +543,7 @@ JavaSparkContext jsc = new JavaSparkContext(conf);
 SQLContext jsql = new SQLContext(jsc);
 
 // Prepare training documents, which are labeled.
-List<LabeledDocument> localTraining = Lists.newArrayList(
+List<LabeledDocument> localTraining = Arrays.asList(
   new LabeledDocument(0L, "a b c d e spark", 1.0),
   new LabeledDocument(1L, "b d", 0.0),
   new LabeledDocument(2L, "spark f g h", 1.0),
@@ -466,7 +568,7 @@ Pipeline pipeline = new Pipeline()
 PipelineModel model = pipeline.fit(training);
 
 // Prepare test documents, which are unlabeled.
-List<Document> localTest = Lists.newArrayList(
+List<Document> localTest = Arrays.asList(
   new Document(4L, "spark i j k"),
   new Document(5L, "l m n"),
   new Document(6L, "mapreduce spark"),
@@ -493,7 +595,7 @@ from pyspark.ml.feature import HashingTF, Tokenizer
 from pyspark.sql import Row, SQLContext
 
 sc = SparkContext(appName="SimpleTextClassificationPipeline")
-sqlCtx = SQLContext(sc)
+sqlContext = SQLContext(sc)
 
 # Prepare training documents, which are labeled.
 LabeledDocument = Row("id", "text", "label")
@@ -524,7 +626,7 @@ test = sc.parallelize([(4L, "spark i j k"),
 prediction = model.transform(test)
 selected = prediction.select("id", "text", "prediction")
 for row in selected.collect():
-    print row
+    print(row)
 
 sc.stop()
 {% endhighlight %}
@@ -564,6 +666,11 @@ import org.apache.spark.ml.feature.{HashingTF, Tokenizer}
 import org.apache.spark.ml.tuning.{ParamGridBuilder, CrossValidator}
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.sql.{Row, SQLContext}
+
+// Labeled and unlabeled instance types.
+// Spark SQL can infer schema from case classes.
+case class LabeledDocument(id: Long, text: String, label: Double)
+case class Document(id: Long, text: String)
 
 val conf = new SparkConf().setAppName("CrossValidatorExample")
 val sc = new SparkContext(conf)
@@ -637,8 +744,9 @@ sc.stop()
 
 <div data-lang="java">
 {% highlight java %}
+import java.util.Arrays;
 import java.util.List;
-import com.google.common.collect.Lists;
+
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.ml.Pipeline;
@@ -655,12 +763,42 @@ import org.apache.spark.sql.DataFrame;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SQLContext;
 
+// Labeled and unlabeled instance types.
+// Spark SQL can infer schema from Java Beans.
+public class Document implements Serializable {
+  private long id;
+  private String text;
+
+  public Document(long id, String text) {
+    this.id = id;
+    this.text = text;
+  }
+
+  public long getId() { return this.id; }
+  public void setId(long id) { this.id = id; }
+
+  public String getText() { return this.text; }
+  public void setText(String text) { this.text = text; }
+}
+
+public class LabeledDocument extends Document implements Serializable {
+  private double label;
+
+  public LabeledDocument(long id, String text, double label) {
+    super(id, text);
+    this.label = label;
+  }
+
+  public double getLabel() { return this.label; }
+  public void setLabel(double label) { this.label = label; }
+}
+
 SparkConf conf = new SparkConf().setAppName("JavaCrossValidatorExample");
 JavaSparkContext jsc = new JavaSparkContext(conf);
 SQLContext jsql = new SQLContext(jsc);
 
 // Prepare training documents, which are labeled.
-List<LabeledDocument> localTraining = Lists.newArrayList(
+List<LabeledDocument> localTraining = Arrays.asList(
   new LabeledDocument(0L, "a b c d e spark", 1.0),
   new LabeledDocument(1L, "b d", 0.0),
   new LabeledDocument(2L, "spark f g h", 1.0),
@@ -709,7 +847,7 @@ crossval.setNumFolds(2); // Use 3+ in practice
 CrossValidatorModel cvModel = crossval.fit(training);
 
 // Prepare test documents, which are unlabeled.
-List<Document> localTest = Lists.newArrayList(
+List<Document> localTest = Arrays.asList(
   new Document(4L, "spark i j k"),
   new Document(5L, "l m n"),
   new Document(6L, "mapreduce spark"),
@@ -737,6 +875,16 @@ Please see the [MLlib Dependencies guide](mllib-guide.html#dependencies) for mor
 Spark ML also depends upon Spark SQL, but the relevant parts of Spark SQL do not bring additional dependencies.
 
 # Migration Guide
+
+## From 1.3 to 1.4
+
+Several major API changes occurred, including:
+* `Param` and other APIs for specifying parameters
+* `uid` unique IDs for Pipeline components
+* Reorganization of certain classes
+Since the `spark.ml` API was an Alpha Component in Spark 1.3, we do not list all changes here.
+
+However, now that `spark.ml` is no longer an Alpha Component, we will provide details on any API changes for future releases.
 
 ## From 1.2 to 1.3
 

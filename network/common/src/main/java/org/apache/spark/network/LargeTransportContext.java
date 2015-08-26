@@ -17,24 +17,9 @@
 
 package org.apache.spark.network;
 
-import com.google.common.collect.Lists;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.socket.SocketChannel;
-import org.apache.spark.network.client.TransportClient;
-import org.apache.spark.network.client.TransportClientBootstrap;
-import org.apache.spark.network.client.TransportClientFactory;
-import org.apache.spark.network.client.TransportResponseHandler;
 import org.apache.spark.network.protocol.*;
 import org.apache.spark.network.server.RpcHandler;
-import org.apache.spark.network.server.TransportChannelHandler;
-import org.apache.spark.network.server.TransportRequestHandler;
-import org.apache.spark.network.server.TransportServer;
-import org.apache.spark.network.util.NettyUtils;
 import org.apache.spark.network.util.TransportConf;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -19,12 +19,9 @@ package org.apache.spark.util
 
 import java.net.URLClassLoader
 
-import org.scalatest.FunSuite
+import org.apache.spark.{SparkContext, SparkException, SparkFunSuite, TestUtils}
 
-import org.apache.spark.{LocalSparkContext, SparkContext, SparkException, TestUtils}
-import org.apache.spark.util.Utils
-
-class MutableURLClassLoaderSuite extends FunSuite {
+class MutableURLClassLoaderSuite extends SparkFunSuite {
 
   val urls2 = List(TestUtils.createJarWithClasses(
       classNames = Seq("FakeClass1", "FakeClass2", "FakeClass3"),
@@ -87,7 +84,9 @@ class MutableURLClassLoaderSuite extends FunSuite {
     try {
       sc.makeRDD(1 to 5, 2).mapPartitions { x =>
         val loader = Thread.currentThread().getContextClassLoader
+        // scalastyle:off classforname
         Class.forName(className, true, loader).newInstance()
+        // scalastyle:on classforname
         Seq().iterator
       }.count()
     }

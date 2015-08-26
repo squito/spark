@@ -67,14 +67,16 @@ public class LargeByteBufferSuite {
   @Test
   public void testDuplicate() throws IOException {
     LargeByteBuffer bb = smallWrapped;
-    bb.position(20);
+    bb.rewind();
+    bb.skip(20);
     LargeByteBuffer dup = bb.duplicate();
     assertEquals(20, dup.position());
 
     FileInputStream fis = new FileInputStream(testFile);
     LargeByteBuffer mapped = LargeByteBufferHelper.mapFile(
       fis.getChannel(), FileChannel.MapMode.READ_ONLY, 0, testFile.length());
-    mapped.position(20);
+    mapped.rewind();
+    mapped.skip(20);
     LargeByteBuffer mappedDup = mapped.duplicate();
     assertEquals(20, mappedDup.position());
     fis.close();
@@ -83,14 +85,16 @@ public class LargeByteBufferSuite {
     fis = new FileInputStream(largeTestFile);
     LargeByteBuffer mappedLarge = LargeByteBufferHelper.mapFile(
       fis.getChannel(), FileChannel.MapMode.READ_ONLY, 0, largeTestFile.length());
-    mappedLarge.position(20);
+    mappedLarge.rewind();
+    mappedLarge.skip(20);
     LargeByteBuffer mappedLargeDup = mappedLarge.duplicate();
     assertEquals(20, mappedLargeDup.position());
     assertEquals((byte)20, mappedLarge.get());
     assertEquals((byte)20, mappedLargeDup.get());
 
     long p = 3000000000L - 50;
-    mappedLarge.position(p);
+    mappedLarge.rewind();
+    mappedLarge.skip(p);
     assertEquals((byte)p, mappedLarge.get());
     fis.close();
   }

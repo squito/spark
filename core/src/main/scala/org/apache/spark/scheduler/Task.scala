@@ -73,6 +73,7 @@ private[spark] abstract class Task[T](
       partitionId,
       taskAttemptId,
       attemptNumber,
+      stageAttemptId,
       taskMemoryManager,
       metricsSystem,
       internalAccumulators,

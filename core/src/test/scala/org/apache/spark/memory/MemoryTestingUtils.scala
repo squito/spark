@@ -30,6 +30,7 @@ object MemoryTestingUtils {
       partitionId = 0,
       taskAttemptId = 0,
       attemptNumber = 0,
+      stageAttemptId = 0,
       taskMemoryManager = taskMemoryManager,
       metricsSystem = env.metricsSystem,
       internalAccumulators = Seq.empty)

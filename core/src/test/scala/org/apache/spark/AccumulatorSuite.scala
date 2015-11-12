@@ -162,7 +162,7 @@ class AccumulatorSuite extends SparkFunSuite with Matchers with LocalSparkContex
   test("internal accumulators in TaskContext") {
     sc = new SparkContext("local", "test")
     val accums = InternalAccumulator.create(sc)
-    val taskContext = new TaskContextImpl(0, 0, 0, 0, null, null, accums)
+    val taskContext = new TaskContextImpl(0, 0, 0, 0, 0, null, null, accums)
     val internalMetricsToAccums = taskContext.internalMetricsToAccumulators
     val collectedInternalAccums = taskContext.collectInternalAccumulators()
     val collectedAccums = taskContext.collectAccumulators()

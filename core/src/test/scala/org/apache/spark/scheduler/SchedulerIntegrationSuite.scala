@@ -521,3 +521,32 @@ class BasicSchedulerIntegrationSuite extends SchedulerIntegrationSuite[SingleCor
     assertDataStructuresEmpty(noFailure = false)
   }
 }
+
+class BackendWithoutKillTaskIntegrationSuite
+    extends SchedulerIntegrationSuite[NoKillMultiExecutorBackend] {
+  testScheduler("job failure after 4 attempts when killTask is unsupported") {
+    def runBackend(): Unit = {
+      val task = backend.beginTask()
+      val failure = new ExceptionFailure(new RuntimeException("test task failure"), Seq())
+      backend.taskFailed(task, TaskState.FAILED, failure)
+    }
+    withBackend(runBackend _) {
+      val nParts = backend.defaultParallelism()
+      val jobFuture = submit(new MockRDD(sc, nParts, Nil), (0 until nParts).toArray)
+      val duration = Duration(10, SECONDS)
+      Await.ready(jobFuture, duration)
+      failure.getMessage.contains("test task failure")
+    }
+    assert(results.isEmpty)
+    assertDataStructuresEmpty(noFailure = false)
+  }
+}
+
+class NoKillMultiExecutorBackend(
+    conf: SparkConf,
+    taskScheduler: TaskSchedulerImpl) extends MultiExecutorMockBackend(conf, taskScheduler) {
+
+  override def killTask(taskId: Long, executorId: String, interruptThread: Boolean): Unit = {
+    throw new UnsupportedOperationException()
+  }
+}

@@ -331,7 +331,11 @@ private[spark] abstract class MockBackend(
         executorIdToExecutor(task.executorId).freeCores += taskScheduler.CPUS_PER_TASK
         freeCores += taskScheduler.CPUS_PER_TASK
       }
-      reviveOffers()
+      // optimization (which is used by the actual backends too) -- don't revive offers on *all*
+      // executors when a task completes, just on the one which completed
+      val exec = executorIdToExecutor(task.executorId)
+      reviveWithOffers(Seq(WorkerOffer(executorId = exec.executorId, host = exec.host,
+          cores = exec.freeCores)))
     }
   }
 
@@ -381,7 +385,10 @@ private[spark] abstract class MockBackend(
    * scheduling.
    */
   override def reviveOffers(): Unit = {
-    val offers: Seq[WorkerOffer] = generateOffers()
+    reviveWithOffers(generateOffers())
+  }
+
+  def reviveWithOffers(offers: Seq[WorkerOffer]): Unit = {
     val newTaskDescriptions = taskScheduler.resourceOffers(offers).flatten
     // get the task now, since that requires a lock on TaskSchedulerImpl, to prevent individual
     // tests from introducing a race if they need it

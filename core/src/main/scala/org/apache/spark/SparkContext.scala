@@ -217,7 +217,6 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   private var _jars: Seq[String] = _
   private var _files: Seq[String] = _
   private var _shutdownHookRef: AnyRef = _
-  private var _blacklistTracker: BlacklistTracker = _
 
   /* ------------------------------------------------------------------------------------- *
    | Accessors and public fields. These provide access to the internal state of the        |
@@ -326,8 +325,6 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     _executorAllocationManager
 
   private[spark] def cleaner: Option[ContextCleaner] = _cleaner
-
-  private[spark] def blacklistTracker: BlacklistTracker = _blacklistTracker
 
   private[spark] var checkpointDir: Option[String] = None
 
@@ -491,7 +488,6 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     _heartbeatReceiver = env.rpcEnv.setupEndpoint(
       HeartbeatReceiver.ENDPOINT_NAME, new HeartbeatReceiver(this))
 
-    _blacklistTracker = SparkContext.createBlacklistTracker(_conf, master)
     // Create and start the scheduler
     val (sched, ts) = SparkContext.createTaskScheduler(this, master, deployMode)
     _schedulerBackend = sched
@@ -536,8 +532,6 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
         None
       }
     _executorAllocationManager.foreach(_.start())
-
-    _blacklistTracker.start()
 
     _cleaner =
       if (_conf.getBoolean("spark.cleaner.referenceTracking", true)) {
@@ -1771,10 +1765,6 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     Utils.tryLogNonFatalError {
       _executorAllocationManager.foreach(_.stop())
     }
-    Utils.tryLogNonFatalError {
-      _blacklistTracker.stop()
-    }
-
     if (_listenerBusStarted) {
       Utils.tryLogNonFatalError {
         listenerBus.stop()
@@ -2419,23 +2409,6 @@ object SparkContext extends Logging {
       case SparkMasterRegex.LOCAL_N_REGEX(threads) => convertToInt(threads)
       case SparkMasterRegex.LOCAL_N_FAILURES_REGEX(threads, _) => convertToInt(threads)
       case _ => 0 // driver is not used for execution
-    }
-  }
-
-  private def createBlacklistTracker(conf: SparkConf, master: String): BlacklistTracker = {
-    import SparkMasterRegex._
-    val isLocalMode = master match {
-      case "local" => true
-      case LOCAL_N_REGEX(_) => true
-      case LOCAL_N_FAILURES_REGEX(_, _) => true
-      case other =>
-        // we *do* want the blacklist enabled in local-cluster mode, for testing
-       false
-    }
-    if (BlacklistTracker.isBlacklistEnabled(conf, isLocalMode)) {
-      new BlacklistTrackerImpl(conf)
-    } else {
-      NoopBlacklistTracker
     }
   }
 

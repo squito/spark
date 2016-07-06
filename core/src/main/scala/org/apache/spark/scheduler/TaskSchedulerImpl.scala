@@ -34,7 +34,7 @@ import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
 import org.apache.spark.scheduler.TaskLocality.TaskLocality
 import org.apache.spark.scheduler.local.LocalSchedulerBackend
 import org.apache.spark.storage.BlockManagerId
-import org.apache.spark.util._
+import org.apache.spark.util.{AccumulatorV2, Clock, SystemClock, ThreadUtils, Utils}
 
 /**
  * Schedules tasks for multiple types of clusters by acting through a SchedulerBackend.
@@ -54,17 +54,19 @@ import org.apache.spark.util._
 private[spark] class TaskSchedulerImpl private[scheduler](
     val sc: SparkContext,
     val maxTaskFailures: Int,
-    private val blacklistTracker: BlacklistTracker,
+    private[scheduler] val blacklistTracker: BlacklistTracker,
     private val clock: Clock = new SystemClock,
     isLocal: Boolean = false)
   extends TaskScheduler with Logging
 {
   def this(sc: SparkContext) = {
-    this(sc, sc.conf.getInt("spark.task.maxFailures", 4), sc.blacklistTracker)
+    this(sc, sc.conf.getInt("spark.task.maxFailures", 4),
+      TaskSchedulerImpl.createBlacklistTracker(sc.conf))
   }
 
   def this(sc: SparkContext, maxTaskFailures: Int, isLocal: Boolean) = {
-    this(sc, maxTaskFailures, sc.blacklistTracker, clock = new SystemClock, isLocal)
+    this(sc, maxTaskFailures, TaskSchedulerImpl.createBlacklistTracker(sc.conf),
+      clock = new SystemClock, isLocal)
   }
 
   val conf = sc.conf
@@ -160,6 +162,7 @@ private[spark] class TaskSchedulerImpl private[scheduler](
 
   override def start() {
     backend.start()
+    blacklistTracker.start()
 
     if (!isLocal && conf.getBoolean("spark.speculation", false)) {
       logInfo("Starting speculative execution thread")
@@ -269,12 +272,15 @@ private[spark] class TaskSchedulerImpl private[scheduler](
       availableCpus: Array[Int],
       tasks: Seq[ArrayBuffer[TaskDescription]]) : Boolean = {
     var launchedTask = false
-    val nodeBlacklist = blacklistTracker.nodeBlacklistForStage(taskSet.stageId)
+    // nodes and executors that are blacklisted for the entire application have already been
+    // filtered out by this point
     for (i <- 0 until shuffledOffers.size) {
-      val execId = shuffledOffers(i).executorId
+      val offer = shuffledOffers(i)
+      val host = offer.host
+      val nodeBlacklisted = blacklistTracker.isNodeBlacklistedForStage(host, taskSet.stageId)
+      val execId = offer.executorId
       val execBlacklisted = blacklistTracker.isExecutorBlacklistedForStage(taskSet.stageId, execId)
-      val host = shuffledOffers(i).host
-      if (!nodeBlacklist(host) && !execBlacklisted && availableCpus(i) >= CPUS_PER_TASK) {
+      if (!nodeBlacklisted && !execBlacklisted && availableCpus(i) >= CPUS_PER_TASK) {
         try {
           for (task <- taskSet.resourceOffer(execId, host, maxLocality)) {
             tasks(i) += task
@@ -302,10 +308,9 @@ private[spark] class TaskSchedulerImpl private[scheduler](
   }
 
   private[scheduler] def areAllExecutorsBlacklisted(): Boolean = {
-    val nodeBlacklist = blacklistTracker.nodeBlacklist()
-    val execBlacklist = blacklistTracker.executorBlacklist()
     executorsByHost.foreach { case (host, execs) =>
-      if (!nodeBlacklist.contains(host) && execs.exists(!execBlacklist.contains(_))) {
+      if (!blacklistTracker.isNodeBlacklisted(host) &&
+          execs.exists(!blacklistTracker.isExecutorBlacklisted(_))) {
         return false
       }
     }
@@ -338,10 +343,9 @@ private[spark] class TaskSchedulerImpl private[scheduler](
     }
 
     val sortedTaskSets = rootPool.getSortedTaskSetQueue
-    val nodeBlacklist = blacklistTracker.nodeBlacklist()
-    val execBlacklist = blacklistTracker.executorBlacklist()
     val filteredOffers: IndexedSeq[WorkerOffer] = offers.filter { offer =>
-      !nodeBlacklist.contains(offer.host)  && !execBlacklist.contains(offer.executorId)
+      !blacklistTracker.isNodeBlacklisted(offer.host)  &&
+        !blacklistTracker.isExecutorBlacklisted(offer.executorId)
     }.toIndexedSeq
     if (offers.nonEmpty && filteredOffers.isEmpty) {
       // Its possible that all the executors are now blacklisted, though we haven't aborted stages
@@ -504,6 +508,7 @@ private[spark] class TaskSchedulerImpl private[scheduler](
 
   override def stop() {
     speculationScheduler.shutdown()
+    blacklistTracker.stop()
     if (backend != null) {
       backend.stop()
     }
@@ -604,7 +609,7 @@ private[spark] class TaskSchedulerImpl private[scheduler](
     dagScheduler.executorAdded(execId, host)
   }
 
-  def getHostForExecutor(execId: String): String = {
+  def getHostForExecutor(execId: String): String = synchronized {
     executorIdToHost(execId)
   }
 
@@ -705,6 +710,14 @@ private[spark] object TaskSchedulerImpl {
     }
 
     retval.toList
+  }
+
+  private def createBlacklistTracker(conf: SparkConf): BlacklistTracker = {
+    if (BlacklistTracker.isBlacklistEnabled(conf)) {
+      new BlacklistTrackerImpl(conf)
+    } else {
+      NoopBlacklistTracker
+    }
   }
 
 }

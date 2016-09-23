@@ -72,12 +72,13 @@ class SchedulerPerformanceSuite extends SchedulerIntegrationSuite[MultiExecutorM
   }
 
   def runSuccessfulJob(N: Int): Unit = {
+    val mapStatus = DAGSchedulerSuite.makeMapStatus("bogus", N)
     runJobWithCustomBackend(N, new FifoBackend(backend) {
       override def handleTask(taskDesc: TaskDescription, task: Task[_], host: String): Unit = {
         // every 5th stage is a ResultStage -- the rest are ShuffleMapStages
         (task.stageId, task.partitionId) match {
           case (stage, _) if stage % 5 != 4 =>
-            queueSuccess(taskDesc, DAGSchedulerSuite.makeMapStatus(host, N))
+            queueSuccess(taskDesc, mapStatus)
           case (_, _) =>
             queueSuccess(taskDesc, 42)
         }

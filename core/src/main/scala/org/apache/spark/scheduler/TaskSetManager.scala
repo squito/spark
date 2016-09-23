@@ -483,8 +483,12 @@ private[spark] class TaskSetManager(
           // a good proxy to task serialization time.
           // val timeTaken = clock.getTime() - startTime
           val taskName = s"task ${info.id} in stage ${taskSet.id}"
-          logInfo(s"Starting $taskName (TID $taskId, $host, executor ${info.executorId}, " +
+          logDebug(s"Starting $taskName (TID $taskId, $host, executor ${info.executorId}, " +
             s"partition ${task.partitionId},$taskLocality, ${serializedTask.limit} bytes)")
+          if (info.index % 10000 == 0) {
+            logInfo(s"Starting $taskName (TID $taskId, $host, executor ${info.executorId}, " +
+              s"partition ${task.partitionId},$taskLocality, ${serializedTask.limit} bytes)")
+          }
 
           sched.dagScheduler.taskStarted(task, info)
           return Some(new TaskDescription(taskId = taskId, attemptNumber = attemptNum, execId,
@@ -707,9 +711,14 @@ private[spark] class TaskSetManager(
     }
     if (!successful(index)) {
       tasksSuccessful += 1
-      logInfo("Finished task %s in stage %s (TID %d) in %d ms on %s (executor %s) (%d/%d)".format(
+      logDebug("Finished task %s in stage %s (TID %d) in %d ms on %s (executor %s) (%d/%d)".format(
         info.id, taskSet.id, info.taskId, info.duration, info.host, info.executorId,
         tasksSuccessful, numTasks))
+      if (tasksSuccessful % 10000 == 0) {
+        logInfo("Finished task %s in stage %s (TID %d) in %d ms on %s (executor %s) (%d/%d)".format(
+          info.id, taskSet.id, info.taskId, info.duration, info.host, info.executorId,
+          tasksSuccessful, numTasks))
+      }
       // Mark successful and stop if all the tasks have succeeded.
       successful(index) = true
       if (tasksSuccessful == numTasks) {

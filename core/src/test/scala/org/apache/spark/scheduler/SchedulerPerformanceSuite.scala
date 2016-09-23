@@ -335,7 +335,7 @@ class SchedulerPerformanceSuite extends SchedulerIntegrationSuite[MultiExecutorM
           // but the scheduler thread hasn't processed those before this thread tries to find
           // another task to respond to.  Really this shouldn't be a huge problem, it just means
           // a few more interspersed successes.
-          logInfo(s"tasksToFail.size = ${tasksToFail.size}; " +
+          logDebug(s"tasksToFail.size = ${tasksToFail.size}; " +
             s"tasksToSucceed.size = ${tasksToSucceed.size}; " +
             s"failuresSinceLastSuccess = ${failuresSinceLastSuccess}")
           failuresSinceLastSuccess = 0

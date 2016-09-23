@@ -114,6 +114,18 @@ class SchedulerPerformanceSuite extends SchedulerIntegrationSuite[MultiExecutorM
     runSuccessfulJob(3000)
   }
 
+
+  testScheduler(
+    "MILLION",
+    extraConfs = Seq(
+      "spark.testing.nHosts" -> "1000",
+      "spark.testing.nExecutorsPerHost" -> "8",
+      "spark.testing.nCoresPerExecutor" -> "4"
+    )
+  ) {
+    runSuccessfulJob(1e6.toInt)
+  }
+
   testScheduler(
     // 4 execs per node, 2 cores per exec, so 400 cores
     "COMPARE A Scheduling speed -- large job on 50 node cluster",

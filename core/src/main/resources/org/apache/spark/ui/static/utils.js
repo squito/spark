@@ -46,7 +46,3 @@ function formatBytes(bytes, type) {
     var i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
-
-function formatBoolean(value) {
-    return value ? "Yes" : "No";
-}

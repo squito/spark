@@ -182,7 +182,7 @@ $(document).ready(function () {
     executorsSummary = $("#active-executors");
 
     getStandAloneppId(function (appId) {
-    
+
         var endPoint = createRESTEndPoint(appId);
         $.getJSON(endPoint, function (response, status, jqXHR) {
             var summary = [];
@@ -203,7 +203,7 @@ $(document).ready(function () {
             var allTotalShuffleRead = 0;
             var allTotalShuffleWrite = 0;
             var allTotalBlacklisted = 0;
-    
+
             var activeExecCnt = 0;
             var activeRDDBlocks = 0;
             var activeMemoryUsed = 0;
@@ -221,7 +221,7 @@ $(document).ready(function () {
             var activeTotalShuffleRead = 0;
             var activeTotalShuffleWrite = 0;
             var activeTotalBlacklisted = 0;
-    
+
             var deadExecCnt = 0;
             var deadRDDBlocks = 0;
             var deadMemoryUsed = 0;
@@ -239,7 +239,7 @@ $(document).ready(function () {
             var deadTotalShuffleRead = 0;
             var deadTotalShuffleWrite = 0;
             var deadTotalBlacklisted = 0;
-    
+
             response.forEach(function (exec) {
                 allExecCnt += 1;
                 allRDDBlocks += exec.rddBlocks;
@@ -296,7 +296,7 @@ $(document).ready(function () {
                     deadTotalBlacklisted += exec.isBlacklisted ? 1 : 0;
                 }
             });
-    
+
             var totalSummary = {
                 "execCnt": ( "Total(" + allExecCnt + ")"),
                 "allRDDBlocks": allRDDBlocks,
@@ -354,10 +354,10 @@ $(document).ready(function () {
                 "allTotalShuffleWrite": deadTotalShuffleWrite,
                 "allTotalBlacklisted": deadTotalBlacklisted
             };
-    
+
             var data = {executors: response, "execSummary": [activeSummary, deadSummary, totalSummary]};
             $.get(createTemplateURI(appId), function (template) {
-    
+
                 executorsSummary.append(Mustache.render($(template).filter("#executors-summary-template").html(), data));
                 var selector = "#active-executors-table";
                 var conf = {
@@ -369,7 +369,12 @@ $(document).ready(function () {
                             }
                         },
                         {data: 'hostPort'},
-                        {data: 'isActive', render: formatStatus},
+                        {data: 'isActive', render: function (data, type, row) {
+                            if (type !== 'display') return data;
+                            if (row.isBlacklisted) return "Blacklisted";
+                            else return formatStatus (data, type);
+                            }
+                        },
                         {data: 'rddBlocks'},
                         {
                             data: function (row, type) {
@@ -412,7 +417,6 @@ $(document).ready(function () {
                         {data: 'totalInputBytes', render: formatBytes},
                         {data: 'totalShuffleRead', render: formatBytes},
                         {data: 'totalShuffleWrite', render: formatBytes},
-                        {data: 'isBlacklisted', render: formatBoolean},
                         {data: 'executorLogs', render: formatLogsCells},
                         {
                             data: 'id', render: function (data, type) {

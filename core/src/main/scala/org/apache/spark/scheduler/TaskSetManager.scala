@@ -160,7 +160,11 @@ private[spark] class TaskSetManager(
   }
 
   // Figure out which locality levels we have in our TaskSet, so we can do delay scheduling
-  var myLocalityLevels = computeValidLocalityLevels()
+  var myLocalityLevels = {
+    val t = computeValidLocalityLevels()
+    logInfo(s"initial localityLevels = ${t.mkString(",")}")
+    t
+  }
   var localityWaits = myLocalityLevels.map(getLocalityWait) // Time to wait at each level
 
   // Delay scheduling variables: we keep track of our current locality level and the time we
@@ -428,6 +432,10 @@ private[spark] class TaskSetManager(
         }
       }
 
+      logInfo(s"about to dequeueTask w/ maxLocality = $maxLocality; " +
+        s"allowedLocality = $allowedLocality")
+      logInfo(s"localityLevels = ${myLocalityLevels.mkString(",")}")
+
       dequeueTask(execId, host, allowedLocality).map { case ((index, taskLocality, speculative)) =>
         // Found a task; do some bookkeeping and return a task description
         val task = tasks(index)
@@ -544,15 +552,17 @@ private[spark] class TaskSetManager(
         // be scheduled at a particular locality level, there is no point in waiting
         // for the locality wait timeout (SPARK-4939).
         lastLaunchTime = curTime
-        logDebug(s"No tasks for locality level ${myLocalityLevels(currentLocalityIndex)}, " +
+        logInfo(s"No tasks for locality level ${myLocalityLevels(currentLocalityIndex)}, " +
           s"so moving to locality level ${myLocalityLevels(currentLocalityIndex + 1)}")
         currentLocalityIndex += 1
       } else if (curTime - lastLaunchTime >= localityWaits(currentLocalityIndex)) {
         // Jump to the next locality level, and reset lastLaunchTime so that the next locality
         // wait timer doesn't immediately expire
         lastLaunchTime += localityWaits(currentLocalityIndex)
-        logDebug(s"Moving to ${myLocalityLevels(currentLocalityIndex + 1)} after waiting for " +
-          s"${localityWaits(currentLocalityIndex)}ms")
+        logInfo(s"Moving from ${myLocalityLevels(currentLocalityIndex)} " +
+          s"to ${myLocalityLevels(currentLocalityIndex + 1)} after waiting for " +
+          s"${localityWaits(currentLocalityIndex)}ms; waits = ${localityWaits.mkString(",")}; " +
+          s"levels = ${myLocalityLevels.mkString(",")}")
         currentLocalityIndex += 1
       } else {
         return myLocalityLevels(currentLocalityIndex)

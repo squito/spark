@@ -549,11 +549,12 @@ class TaskSetManagerSuite extends SparkFunSuite with LocalSparkContext with Logg
       Seq(TaskLocation("host1", "execB")),
       Seq(TaskLocation("host2", "execC")),
       Seq())
-    val manager = new TaskSetManager(sched, taskSet, 1, clock = new ManualClock)
     sched.addExecutor("execA", "host1")
+    val manager = new TaskSetManager(sched, taskSet, 1, clock = new ManualClock)
     manager.executorAdded()
     sched.addExecutor("execC", "host2")
     manager.executorAdded()
+    logInfo("about to make initial resource offer")
     assert(manager.resourceOffer("exec1", "host1", ANY).isDefined)
     sched.removeExecutor("execA")
     manager.executorLost(

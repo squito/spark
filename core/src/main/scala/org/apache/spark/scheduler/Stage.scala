@@ -68,6 +68,12 @@ private[scheduler] abstract class Stage(
   /** Set of jobs that this stage belongs to. */
   val jobIds = new HashSet[Int]
 
+  /**
+   * Partitions which there is not yet a task succeeded on. Note that for [[ShuffleMapStage]]
+   * pendingPartitions.size() == 0 doesn't mean the stage is available. Because the succeeded
+   * task can be bogus which is out of date and task's epoch is older than corresponding
+   * executor's failed epoch in [[DAGScheduler]].
+   */
   val pendingPartitions = new HashSet[Int]
 
   /** The ID to use for the next new attempt for this stage. */
@@ -77,7 +83,7 @@ private[scheduler] abstract class Stage(
   val details: String = callSite.longForm
 
   /**
-   * Pointer to the [StageInfo] object for the most recent attempt. This needs to be initialized
+   * Pointer to the [[StageInfo]] object for the most recent attempt. This needs to be initialized
    * here, before any attempts have actually been created, because the DAGScheduler uses this
    * StageInfo to tell SparkListeners when a job starts (which happens before any stage attempts
    * have been created).

@@ -1193,7 +1193,14 @@ class DAGScheduler(
             }
 
             if (runningStages.contains(shuffleStage) && shuffleStage.pendingPartitions.isEmpty) {
-              markStageAsFinished(shuffleStage)
+              val noActiveTaskSetManager =
+                taskScheduler.rootPool == null ||
+                  !taskScheduler.rootPool.getSortedTaskSetQueue.exists {
+                    tsm => tsm.stageId == stageId && !tsm.isZombie
+                  }
+              if (shuffleStage.isAvailable || noActiveTaskSetManager) {
+                markStageAsFinished(shuffleStage)
+              }
               logInfo("looking for newly runnable stages")
               logInfo("running: " + runningStages)
               logInfo("waiting: " + waitingStages)
@@ -1218,7 +1225,9 @@ class DAGScheduler(
                 logInfo("Resubmitting " + shuffleStage + " (" + shuffleStage.name +
                   ") because some of its tasks had failed: " +
                   shuffleStage.findMissingPartitions().mkString(", "))
-                submitStage(shuffleStage)
+                if (noActiveTaskSetManager) {
+                  submitStage(shuffleStage)
+                }
               } else {
                 // Mark any map-stage jobs waiting on this stage as finished
                 if (shuffleStage.mapStageJobs.nonEmpty) {

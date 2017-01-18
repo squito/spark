@@ -107,6 +107,7 @@ final class ShuffleBlockFetcherIterator(
    * the number of bytes in flight is limited to maxBytesInFlight.
    */
   private[this] val fetchRequests = new Queue[FetchRequest]
+  private[this] var fetchesInitialized = false
 
   /** Current bytes in flight from our requests */
   private[this] var bytesInFlight = 0L
@@ -289,14 +290,28 @@ final class ShuffleBlockFetcherIterator(
     val remoteRequests = splitLocalRemoteBlocks()
     // Add the remote requests into our queue in a random order
     fetchRequests ++= Utils.randomize(remoteRequests)
-    assert ((0 == reqsInFlight) == (0 == bytesInFlight),
+    assert((0 == reqsInFlight) == (0 == bytesInFlight),
       "expected reqsInFlight = 0 but found reqsInFlight = " + reqsInFlight +
-      ", expected bytesInFlight = 0 but found bytesInFlight = " + bytesInFlight)
+        ", expected bytesInFlight = 0 but found bytesInFlight = " + bytesInFlight)
 
     // Send out initial requests for blocks, up to our maxBytesInFlight
+    if (false) {
+      initialFetches()
+    }
+  }
+
+  private[this] def initialFetches(): Unit = {
+    try {
+      throw new RuntimeException()
+    } catch {
+      case rt: RuntimeException =>
+        logInfo("starting initial fetches", rt)
+    }
+    fetchesInitialized = true
+    val initialNumRequests = fetchRequests.size
     fetchUpToMaxBytes()
 
-    val numFetches = remoteRequests.size - fetchRequests.size
+    val numFetches = initialNumRequests - fetchRequests.size
     logInfo("Started " + numFetches + " remote fetches in" + Utils.getUsedTimeMs(startTime))
 
     // Get Local Blocks
@@ -317,6 +332,9 @@ final class ShuffleBlockFetcherIterator(
   override def next(): (BlockId, InputStream) = {
     if (!hasNext) {
       throw new NoSuchElementException
+    }
+    if (!fetchesInitialized) {
+      initialFetches()
     }
 
     numBlocksProcessed += 1

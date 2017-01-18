@@ -102,6 +102,8 @@ object FileFormatWriter extends Logging {
       refreshFunction: (Seq[TablePartitionSpec]) => Unit,
       options: Map[String, String]): Unit = {
 
+    logInfo("calling FileFormatWriter.write()")
+
     val job = Job.getInstance(hadoopConf)
     job.setOutputKeyClass(classOf[Void])
     job.setOutputValueClass(classOf[InternalRow])
@@ -167,6 +169,8 @@ object FileFormatWriter extends Logging {
       sparkAttemptNumber: Int,
       committer: FileCommitProtocol,
       iterator: Iterator[InternalRow]): (TaskCommitMessage, Set[String]) = {
+
+    logInfo("calling FileFormatWriter.executeTask()")
 
     val jobId = SparkHadoopWriterUtils.createJobID(new Date, sparkStageId)
     val taskId = new TaskID(jobId, TaskType.MAP, sparkPartitionId)
@@ -254,6 +258,12 @@ object FileFormatWriter extends Logging {
       var fileCounter = 0
       var recordsInFile: Long = 0L
       newOutputWriter(fileCounter)
+      if (SparkEnv.get.executorId == "0" && TaskContext.get().partitionId() > 1) {
+        logError("Killing executor in WriteTask.execute()")
+        logError(s"input iter = ${iter.getClass()}")
+        System.exit(42)
+      }
+      logInfo(s"Beginning WriteTask.execute() with iter = ${iter.getClass()}")
       while (iter.hasNext) {
         if (description.maxRecordsPerFile > 0 && recordsInFile >= description.maxRecordsPerFile) {
           fileCounter += 1

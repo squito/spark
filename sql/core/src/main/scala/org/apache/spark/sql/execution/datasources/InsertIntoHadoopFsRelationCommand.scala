@@ -64,6 +64,7 @@ case class InsertIntoHadoopFsRelationCommand(
       throw new AnalysisException(s"Duplicate column(s) : $duplicateColumns found, " +
           s"cannot save to file.")
     }
+    logInfo("calling InsertIntoHadoopFsRelationCommand.run()")
 
     val hadoopConf = sparkSession.sessionState.newHadoopConfWithOptions(options)
     val fs = outputPath.getFileSystem(hadoopConf)

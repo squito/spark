@@ -292,7 +292,13 @@ private[deploy] class Master(
             if (!appInfo.isFinished) {
               appInfo.removeExecutor(exec)
             }
-            exec.worker.removeExecutor(exec)
+            // in tests for fault-tolerance, where we kill executors, its sometimes useful to not
+            // have the executor replaced.
+            if (conf.getBoolean("spark.testing.master.replaceExecutors", true)) {
+              exec.worker.removeExecutor(exec)
+            } else {
+              logInfo("Will not release resources for dead executor")
+            }
 
             val normalExit = exitStatus == Some(0)
             // Only retry certain number of times so we don't go into an infinite loop.

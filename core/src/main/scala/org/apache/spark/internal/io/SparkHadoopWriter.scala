@@ -60,17 +60,21 @@ object SparkHadoopWriter extends Logging {
       config: HadoopWriteConfigUtil[K, V]): Unit = {
     // Extract context and configuration from RDD.
     val sparkContext = rdd.context
-    val rddId = rdd.id
+
+    // Extract the StageId of the rdd and increase it by one
+    // to determine the StageId of the commitJob
+    sparkContext.runJob(rdd, (context: TaskContext, iter: Iterator[(K, V)]) => {
+      stageID.stageId = context.stageId + 1})
 
     // Set up a job.
     val jobTrackerId = createJobTrackerID(new Date())
-    val jobContext = config.createJobContext(jobTrackerId, rddId)
+    val jobContext = config.createJobContext(jobTrackerId, stageID.stageId)
     config.initOutputFormat(jobContext)
 
     // Assert the output format/key/value class is set in JobConf.
     config.assertConf(jobContext, rdd.conf)
 
-    val committer = config.createCommitter(rddId)
+    val committer = config.createCommitter(stageID.stageId)
     committer.setupJob(jobContext)
 
     // Try to write all RDD partitions as a Hadoop OutputFormat.
@@ -80,7 +84,7 @@ object SparkHadoopWriter extends Logging {
           context = context,
           config = config,
           jobTrackerId = jobTrackerId,
-          sparkRDDId = rddId,
+          sparkStageId = context.stageId,
           sparkPartitionId = context.partitionId,
           sparkAttemptNumber = context.attemptNumber,
           committer = committer,
@@ -102,14 +106,14 @@ object SparkHadoopWriter extends Logging {
       context: TaskContext,
       config: HadoopWriteConfigUtil[K, V],
       jobTrackerId: String,
-      sparkRDDId: Int,
+      sparkStageId: Int,
       sparkPartitionId: Int,
       sparkAttemptNumber: Int,
       committer: FileCommitProtocol,
       iterator: Iterator[(K, V)]): TaskCommitMessage = {
     // Set up a task.
     val taskContext = config.createTaskAttemptContext(
-      jobTrackerId, sparkRDDId, sparkPartitionId, sparkAttemptNumber)
+      jobTrackerId, sparkStageId, sparkPartitionId, sparkAttemptNumber)
     committer.setupTask(taskContext)
 
     val (outputMetrics, callback) = initHadoopOutputMetrics(context)
@@ -387,4 +391,9 @@ class HadoopMapReduceWriteConfigUtil[K, V: ClassTag](conf: SerializableConfigura
       getOutputFormat().checkOutputSpecs(jobContext)
     }
   }
+}
+
+private[spark]
+object stageID {
+  var stageId = -1
 }

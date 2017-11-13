@@ -384,6 +384,20 @@ class DAGScheduler(
     stage
   }
 
+  private def createResultStage(
+                                 rdd: RDD[_],
+                                 confFunc: (TaskContext) => Unit,
+                                 func: (TaskContext, Iterator[_]) => _,
+                                 partitions: Array[Int],
+                                 jobId: Int,
+                                 callSite: CallSite): ResultStage = {
+    val parents = getOrCreateParentStages(rdd, jobId)
+    val id = nextStageId.getAndIncrement()
+    val stage = new ResultStage(id, rdd, confFunc, func, partitions, parents, jobId, callSite)
+    stageIdToStage(id) = stage
+    updateJobIdStageIdMaps(jobId, stage)
+    stage
+  }
   /**
    * Get or create the list of parent stages for a given RDD.  The new Stages will be created with
    * the provided firstJobId.
@@ -601,8 +615,40 @@ class DAGScheduler(
     assert(partitions.size > 0)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
     val waiter = new JobWaiter(this, jobId, partitions.size, resultHandler)
-    eventProcessLoop.post(JobSubmitted(
-      jobId, rdd, func2, partitions.toArray, callSite, waiter,
+    eventProcessLoop.post( JobSubmitted(jobId, rdd, func2, partitions.toArray,
+      callSite, waiter, SerializationUtils.clone(properties)))
+    waiter
+  }
+
+  private[spark]
+  def submitJob[T, U](
+                       rdd: RDD[T],
+                       confFunc: (TaskContext) => Unit,
+                       func: (TaskContext, Iterator[T]) => U,
+                       partitions: Seq[Int],
+                       callSite: CallSite,
+                       resultHandler: (Int, U) => Unit,
+                       properties: Properties): JobWaiter[U] = {
+    // Check to make sure we are not launching a task on a partition that does not exist.
+    val maxPartitions = rdd.partitions.length
+    partitions.find(p => p >= maxPartitions || p < 0).foreach { p =>
+      throw new IllegalArgumentException(
+        "Attempting to access a non-existent partition: " + p + ". " +
+          "Total number of partitions: " + maxPartitions)
+    }
+
+    val jobId = nextJobId.getAndIncrement()
+    if (partitions.size == 0) {
+      // Return immediately if the job is running 0 tasks
+      return new JobWaiter[U](this, jobId, 0, resultHandler)
+    }
+
+    assert(partitions.size > 0)
+    val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
+    val confFunc2 = confFunc.asInstanceOf[(TaskContext) => Unit]
+    val waiter = new JobWaiter(this, jobId, partitions.size, resultHandler)
+    eventProcessLoop.post(JobSubmittedWithConf(
+      jobId, rdd, confFunc2, func2, partitions.toArray, callSite, waiter,
       SerializationUtils.clone(properties)))
     waiter
   }
@@ -645,6 +691,32 @@ class DAGScheduler(
     }
   }
 
+  private[spark]
+  def runJob[T, U](
+                    rdd: RDD[T],
+                    confFunc: (TaskContext) => Unit,
+                    func: (TaskContext, Iterator[T]) => U,
+                    partitions: Seq[Int],
+                    callSite: CallSite,
+                    resultHandler: (Int, U) => Unit,
+                    properties: Properties): Unit = {
+    val start = System.nanoTime
+    val waiter = submitJob(rdd, confFunc, func, partitions, callSite, resultHandler, properties)
+    ThreadUtils.awaitReady(waiter.completionFuture, Duration.Inf)
+    waiter.completionFuture.value.get match {
+      case scala.util.Success(_) =>
+        logInfo("Job %d finished: %s, took %f s".format
+        (waiter.jobId, callSite.shortForm, (System.nanoTime - start) / 1e9))
+      case scala.util.Failure(exception) =>
+        logInfo("Job %d failed: %s, took %f s".format
+        (waiter.jobId, callSite.shortForm, (System.nanoTime - start) / 1e9))
+        // SPARK-8644: Include user stack trace in exceptions coming from DAGScheduler.
+        val callerStackTrace = Thread.currentThread().getStackTrace.tail
+        exception.setStackTrace(exception.getStackTrace ++ callerStackTrace)
+        throw exception
+    }
+  }
+
   /**
    * Run an approximate job on the given RDD and pass all the results to an ApproximateEvaluator
    * as they arrive. Returns a partial result object from the evaluator.
@@ -668,7 +740,8 @@ class DAGScheduler(
     val partitions = (0 until rdd.partitions.length).toArray
     val jobId = nextJobId.getAndIncrement()
     eventProcessLoop.post(JobSubmitted(
-      jobId, rdd, func2, partitions, callSite, listener, SerializationUtils.clone(properties)))
+      jobId, rdd, func2, partitions, callSite, listener,
+      SerializationUtils.clone(properties)))
     listener.awaitResult()    // Will throw an exception if the job fails
   }
 
@@ -863,7 +936,46 @@ class DAGScheduler(
     try {
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
-      finalStage = createResultStage(finalRDD, func, partitions, jobId, callSite)
+      finalStage = createResultStage(finalRDD, null, func, partitions, jobId, callSite)
+    } catch {
+      case e: Exception =>
+        logWarning("Creating new stage failed due to exception - job: " + jobId, e)
+        listener.jobFailed(e)
+        return
+    }
+
+    val job = new ActiveJob(jobId, finalStage, callSite, listener, properties)
+    clearCacheLocs()
+    logInfo("Got job %s (%s) with %d output partitions".format(
+      job.jobId, callSite.shortForm, partitions.length))
+    logInfo("Final stage: " + finalStage + " (" + finalStage.name + ")")
+    logInfo("Parents of final stage: " + finalStage.parents)
+    logInfo("Missing parents: " + getMissingParentStages(finalStage))
+
+    val jobSubmissionTime = clock.getTimeMillis()
+    jobIdToActiveJob(jobId) = job
+    activeJobs += job
+    finalStage.setActiveJob(job)
+    val stageIds = jobIdToStageIds(jobId).toArray
+    val stageInfos = stageIds.flatMap(id => stageIdToStage.get(id).map(_.latestInfo))
+    listenerBus.post(
+      SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
+    submitStage(finalStage)
+  }
+
+  private[scheduler] def handleJobSubmitted(jobId: Int,
+                                            finalRDD: RDD[_],
+                                            confFunc: (TaskContext) => Unit,
+                                            func: (TaskContext, Iterator[_]) => _,
+                                            partitions: Array[Int],
+                                            callSite: CallSite,
+                                            listener: JobListener,
+                                            properties: Properties) {
+    var finalStage: ResultStage = null
+    try {
+      // New stage creation may throw an exception if, for example, jobs are run on a
+      // HadoopRDD whose underlying HDFS files have been deleted.
+      finalStage = createResultStage(finalRDD, confFunc, func, partitions, jobId, callSite)
     } catch {
       case e: Exception =>
         logWarning("Creating new stage failed due to exception - job: " + jobId, e)
@@ -1023,7 +1135,7 @@ class DAGScheduler(
           JavaUtils.bufferToArray(
             closureSerializer.serialize((stage.rdd, stage.shuffleDep): AnyRef))
         case stage: ResultStage =>
-          JavaUtils.bufferToArray(closureSerializer.serialize((stage.rdd, stage.func): AnyRef))
+          JavaUtils.bufferToArray(closureSerializer.serialize((stage.rdd, stage.confFunc, stage.func): AnyRef))
       }
 
       taskBinary = sc.broadcast(taskBinaryBytes)
@@ -1757,6 +1869,10 @@ private[scheduler] class DAGSchedulerEventProcessLoop(dagScheduler: DAGScheduler
   private def doOnReceive(event: DAGSchedulerEvent): Unit = event match {
     case JobSubmitted(jobId, rdd, func, partitions, callSite, listener, properties) =>
       dagScheduler.handleJobSubmitted(jobId, rdd, func, partitions, callSite, listener, properties)
+
+    case JobSubmittedWithConf(jobId, rdd, confFunc, func, partitions, callSite, listener,
+    properties) => dagScheduler.handleJobSubmitted(jobId, rdd, confFunc, func, partitions, callSite,
+        listener, properties)
 
     case MapStageSubmitted(jobId, dependency, callSite, listener, properties) =>
       dagScheduler.handleMapStageSubmitted(jobId, dependency, callSite, listener, properties)

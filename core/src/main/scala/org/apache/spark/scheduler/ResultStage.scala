@@ -30,12 +30,22 @@ import org.apache.spark.util.CallSite
 private[spark] class ResultStage(
     id: Int,
     rdd: RDD[_],
+    val confFunc: (TaskContext) => Unit,
     val func: (TaskContext, Iterator[_]) => _,
     val partitions: Array[Int],
     parents: List[Stage],
     firstJobId: Int,
     callSite: CallSite)
   extends Stage(id, rdd, partitions.length, parents, firstJobId, callSite) {
+
+  def this(
+      id: Int,
+      rdd: RDD[_],
+      func: (TaskContext, Iterator[_]) => _,
+      partitions: Array[Int],
+      parents: List[Stage],
+      firstJobId: Int,
+      callSite: CallSite) = this( id, rdd, null, func, partitions, parents, firstJobId, callSite)
 
   /**
    * The active job for this result stage. Will be empty if the job has already finished

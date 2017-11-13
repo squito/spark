@@ -44,6 +44,17 @@ private[scheduler] case class JobSubmitted(
     properties: Properties = null)
   extends DAGSchedulerEvent
 
+
+private[scheduler] case class JobSubmittedWithConf(jobId: Int,
+           finalRDD: RDD[_],
+           confFunc: (TaskContext) => Unit,
+           func: (TaskContext, Iterator[_]) => _,
+           partitions: Array[Int],
+           callSite: CallSite,
+           listener: JobListener,
+           properties: Properties = null)
+  extends DAGSchedulerEvent
+
 /** A map stage as submitted to run as a separate job */
 private[scheduler] case class MapStageSubmitted(
   jobId: Int,

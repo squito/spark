@@ -2025,6 +2025,27 @@ class SparkContext(config: SparkConf) extends Logging {
     rdd.doCheckpoint()
   }
 
+  private
+  def runJob[T, U: ClassTag](
+      rdd: RDD[T],
+      confFunc: (TaskContext) => Unit,
+      func: (TaskContext, Iterator[T]) => U,
+      partitions: Seq[Int],
+      resultHandler: (Int, U) => Unit): Unit = {
+    if (stopped.get()) {
+      throw new IllegalStateException("SparkContext has been shutdown")
+    }
+    val callSite = getCallSite
+    val cleanedFunc = clean(func)
+    logInfo("Starting job: " + callSite.shortForm)
+    if (conf.getBoolean("spark.logLineage", false)) {
+      logInfo("RDD's recursive dependencies:\n" + rdd.toDebugString)
+    }
+    dagScheduler.runJob(rdd, confFunc, cleanedFunc, partitions, callSite, resultHandler,
+      localProperties.get)
+    progressBar.foreach(_.finishAll())
+    rdd.doCheckpoint()
+  }
   /**
    * Run a function on a given set of partitions in an RDD and return the results as an array.
    * The function that is run against each partition additionally takes `TaskContext` argument.
@@ -2042,6 +2063,17 @@ class SparkContext(config: SparkConf) extends Logging {
       partitions: Seq[Int]): Array[U] = {
     val results = new Array[U](partitions.size)
     runJob[T, U](rdd, func, partitions, (index, res) => results(index) = res)
+    results
+  }
+
+  private
+  def runJob[T, U: ClassTag](
+      rdd: RDD[T],
+      confFunc: (TaskContext) => Unit,
+      func: (TaskContext, Iterator[T]) => U,
+      partitions: Seq[Int]): Array[U] = {
+    val results = new Array[U](partitions.size)
+    runJob[T, U](rdd, confFunc, func, partitions, (index, res) => results(index) = res)
     results
   }
 
@@ -2074,6 +2106,13 @@ class SparkContext(config: SparkConf) extends Logging {
    */
   def runJob[T, U: ClassTag](rdd: RDD[T], func: (TaskContext, Iterator[T]) => U): Array[U] = {
     runJob(rdd, func, 0 until rdd.partitions.length)
+  }
+
+  private[spark]
+  def runJob[T, U: ClassTag](rdd: RDD[T], confFunc: (TaskContext) =>
+    Unit, func: (TaskContext, Iterator[T]) => U): Array[U] = {
+    runJob(rdd, confFunc, func, 0 until rdd.partitions.length)
+
   }
 
   /**

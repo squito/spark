@@ -69,33 +69,33 @@ object SparkHadoopWriter extends Logging {
 
     // Assert the output format/key/value class is set in JobConf.
     // config.assertConf(jobContext, rdd.conf)
-    stageID.rddConf = rdd.conf
+    stageInfo.rddConf = rdd.conf
 
     // val committer = config.createCommitter(stageID.stageId)
     // committer.setupJob(jobContext)
 
     // Try to write all RDD partitions as a Hadoop OutputFormat.
     try {
-      val ret = sparkContext.runJob(rdd,
+      val ret = sparkContext.runJob(rdd, (context: TaskContext) => {createConf(context = context,
+        config = config)},
         (context: TaskContext, iter: Iterator[(K, V)]) => {
-          createConf(context = context, config = config)
         executeTask(
           context = context,
           config = config,
-          jobTrackerId = stageID.jobTrackerId,
+          jobTrackerId = stageInfo.jobTrackerId,
           sparkStageId = context.stageId,
           sparkPartitionId = context.partitionId,
           sparkAttemptNumber = context.attemptNumber,
-          committer = stageID.committer,
+          committer = stageInfo.committer,
           iterator = iter)
       })
 
-      stageID.committer.commitJob(stageID.jobContext, ret)
-      logInfo(s"Job ${stageID.jobContext.getJobID} committed.")
+      stageInfo.committer.commitJob(stageInfo.jobContext, ret)
+      logInfo(s"Job ${stageInfo.jobContext.getJobID} committed.")
     } catch {
       case cause: Throwable =>
-        logError(s"Aborting job ${stageID.jobContext.getJobID}.", cause)
-        stageID.committer.abortJob(stageID.jobContext)
+        logError(s"Aborting job ${stageInfo.jobContext.getJobID}.", cause)
+        stageInfo.committer.abortJob(stageInfo.jobContext)
         throw new SparkException("Job aborted.", cause)
     }
   }
@@ -107,13 +107,13 @@ object SparkHadoopWriter extends Logging {
     config.initOutputFormat(jobContext)
 
     // Assert the output format/key/value class is set in JobConf.
-    config.assertConf(jobContext, stageID.rddConf)
-
+    config.assertConf(jobContext, stageInfo.rddConf)
+    logInfo("The config creation is called")
     val committer = config.createCommitter(context.stageId)
     committer.setupJob(jobContext)
-    stageID.committer = committer
-    stageID.jobContext = jobContext
-    stageID.jobTrackerId = jobTrackerId
+    stageInfo.committer = committer
+    stageInfo.jobContext = jobContext
+    stageInfo.jobTrackerId = jobTrackerId
   }
   /** Write a RDD partition out in a single Spark task. */
   private def executeTask[K, V: ClassTag](
@@ -407,7 +407,7 @@ class HadoopMapReduceWriteConfigUtil[K, V: ClassTag](conf: SerializableConfigura
   }
 }
 
-object stageID {
+object stageInfo {
   var committer: HadoopMapReduceCommitProtocol = new HadoopMapReduceCommitProtocol("", "")
   var jobContext: NewJobContext = null
   var jobTrackerId: String = ""

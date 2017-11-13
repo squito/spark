@@ -47,7 +47,7 @@ private[scheduler] case class JobSubmitted(
 
 private[scheduler] case class JobSubmittedWithConf(jobId: Int,
            finalRDD: RDD[_],
-           confFunc: (TaskContext) => Unit,
+           confFunc: (Integer) => Unit,
            func: (TaskContext, Iterator[_]) => _,
            partitions: Array[Int],
            callSite: CallSite,

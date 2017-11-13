@@ -2028,7 +2028,7 @@ class SparkContext(config: SparkConf) extends Logging {
   private
   def runJob[T, U: ClassTag](
       rdd: RDD[T],
-      confFunc: (TaskContext) => Unit,
+      confFunc: (Integer) => Unit,
       func: (TaskContext, Iterator[T]) => U,
       partitions: Seq[Int],
       resultHandler: (Int, U) => Unit): Unit = {
@@ -2069,7 +2069,7 @@ class SparkContext(config: SparkConf) extends Logging {
   private
   def runJob[T, U: ClassTag](
       rdd: RDD[T],
-      confFunc: (TaskContext) => Unit,
+      confFunc: (Integer) => Unit,
       func: (TaskContext, Iterator[T]) => U,
       partitions: Seq[Int]): Array[U] = {
     val results = new Array[U](partitions.size)
@@ -2109,7 +2109,7 @@ class SparkContext(config: SparkConf) extends Logging {
   }
 
   private[spark]
-  def runJob[T, U: ClassTag](rdd: RDD[T], confFunc: (TaskContext) =>
+  def runJob[T, U: ClassTag](rdd: RDD[T], confFunc: (Integer) =>
     Unit, func: (TaskContext, Iterator[T]) => U): Array[U] = {
     runJob(rdd, confFunc, func, 0 until rdd.partitions.length)
 

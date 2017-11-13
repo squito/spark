@@ -76,7 +76,7 @@ object SparkHadoopWriter extends Logging {
 
     // Try to write all RDD partitions as a Hadoop OutputFormat.
     try {
-      val ret = sparkContext.runJob(rdd, (context: TaskContext) => {createConf(context = context,
+      val ret = sparkContext.runJob(rdd, (stageId: Integer) => {createConf(stageId,
         config = config)},
         (context: TaskContext, iter: Iterator[(K, V)]) => {
         executeTask(
@@ -100,20 +100,20 @@ object SparkHadoopWriter extends Logging {
     }
   }
 
-  private def createConf[K, V: ClassTag](context: TaskContext, config: HadoopWriteConfigUtil[K, V]):
+  private def createConf[K, V: ClassTag](stageId: Integer, config: HadoopWriteConfigUtil[K, V]):
   Unit = {
-    val jobTrackerId = createJobTrackerID(new Date())
-    val jobContext = config.createJobContext(jobTrackerId, context.stageId)
-    config.initOutputFormat(jobContext)
+      val jobTrackerId = createJobTrackerID(new Date())
+      val jobContext = config.createJobContext(jobTrackerId, stageId)
+      config.initOutputFormat(jobContext)
 
-    // Assert the output format/key/value class is set in JobConf.
-    config.assertConf(jobContext, stageInfo.rddConf)
-    logInfo("The config creation is called")
-    val committer = config.createCommitter(context.stageId)
-    committer.setupJob(jobContext)
-    stageInfo.committer = committer
-    stageInfo.jobContext = jobContext
-    stageInfo.jobTrackerId = jobTrackerId
+      // Assert the output format/key/value class is set in JobConf.
+      config.assertConf(jobContext, stageInfo.rddConf)
+      logInfo("The config creation is called")
+      val committer = config.createCommitter(stageId)
+      committer.setupJob(jobContext)
+      stageInfo.committer = committer
+      stageInfo.jobContext = jobContext
+      stageInfo.jobTrackerId = jobTrackerId
   }
   /** Write a RDD partition out in a single Spark task. */
   private def executeTask[K, V: ClassTag](

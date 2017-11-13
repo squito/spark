@@ -383,21 +383,6 @@ class DAGScheduler(
     updateJobIdStageIdMaps(jobId, stage)
     stage
   }
-
-  private def createResultStage(
-                                 rdd: RDD[_],
-                                 confFunc: (TaskContext) => Unit,
-                                 func: (TaskContext, Iterator[_]) => _,
-                                 partitions: Array[Int],
-                                 jobId: Int,
-                                 callSite: CallSite): ResultStage = {
-    val parents = getOrCreateParentStages(rdd, jobId)
-    val id = nextStageId.getAndIncrement()
-    val stage = new ResultStage(id, rdd, confFunc, func, partitions, parents, jobId, callSite)
-    stageIdToStage(id) = stage
-    updateJobIdStageIdMaps(jobId, stage)
-    stage
-  }
   /**
    * Get or create the list of parent stages for a given RDD.  The new Stages will be created with
    * the provided firstJobId.
@@ -623,7 +608,7 @@ class DAGScheduler(
   private[spark]
   def submitJob[T, U](
                        rdd: RDD[T],
-                       confFunc: (TaskContext) => Unit,
+                       confFunc: (Integer) => Unit,
                        func: (TaskContext, Iterator[T]) => U,
                        partitions: Seq[Int],
                        callSite: CallSite,
@@ -645,7 +630,7 @@ class DAGScheduler(
 
     assert(partitions.size > 0)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
-    val confFunc2 = confFunc.asInstanceOf[(TaskContext) => Unit]
+    val confFunc2 = confFunc.asInstanceOf[(Integer) => Unit]
     val waiter = new JobWaiter(this, jobId, partitions.size, resultHandler)
     eventProcessLoop.post(JobSubmittedWithConf(
       jobId, rdd, confFunc2, func2, partitions.toArray, callSite, waiter,
@@ -694,7 +679,7 @@ class DAGScheduler(
   private[spark]
   def runJob[T, U](
                     rdd: RDD[T],
-                    confFunc: (TaskContext) => Unit,
+                    confFunc: (Integer) => Unit,
                     func: (TaskContext, Iterator[T]) => U,
                     partitions: Seq[Int],
                     callSite: CallSite,
@@ -936,7 +921,7 @@ class DAGScheduler(
     try {
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
-      finalStage = createResultStage(finalRDD, null, func, partitions, jobId, callSite)
+      finalStage = createResultStage(finalRDD, func, partitions, jobId, callSite)
     } catch {
       case e: Exception =>
         logWarning("Creating new stage failed due to exception - job: " + jobId, e)
@@ -965,7 +950,7 @@ class DAGScheduler(
 
   private[scheduler] def handleJobSubmitted(jobId: Int,
                                             finalRDD: RDD[_],
-                                            confFunc: (TaskContext) => Unit,
+                                            confFunc: (Integer) => Unit,
                                             func: (TaskContext, Iterator[_]) => _,
                                             partitions: Array[Int],
                                             callSite: CallSite,
@@ -975,7 +960,9 @@ class DAGScheduler(
     try {
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
-      finalStage = createResultStage(finalRDD, confFunc, func, partitions, jobId, callSite)
+      confFunc
+      finalStage = createResultStage(finalRDD, func, partitions, jobId, callSite)
+      confFunc(finalStage.id)
     } catch {
       case e: Exception =>
         logWarning("Creating new stage failed due to exception - job: " + jobId, e)
@@ -1135,7 +1122,7 @@ class DAGScheduler(
           JavaUtils.bufferToArray(
             closureSerializer.serialize((stage.rdd, stage.shuffleDep): AnyRef))
         case stage: ResultStage =>
-          JavaUtils.bufferToArray(closureSerializer.serialize((stage.rdd, stage.confFunc, stage.func): AnyRef))
+          JavaUtils.bufferToArray(closureSerializer.serialize((stage.rdd, stage.func): AnyRef))
       }
 
       taskBinary = sc.broadcast(taskBinaryBytes)

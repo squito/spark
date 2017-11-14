@@ -2025,6 +2025,18 @@ class SparkContext(config: SparkConf) extends Logging {
     rdd.doCheckpoint()
   }
 
+  /**
+    * Create configs on driver using a provided function that accepts an integer as parameter
+    * and then run a function on a given set of partitions in an RDD and pass the results to
+    * the given handler function. This is the main entry point for all actions in Spark.
+    *
+    * @param rdd target RDD to run tasks on
+    * @param confFunc a function to create configurations on the driver
+    * @param func a function to run on each partition of the RDD
+    * @param partitions set of partitions to run on; some jobs may not want to compute on all
+    * partitions of the target RDD, e.g. for operations like `first()`
+    * @param resultHandler callback to pass each result to
+    */
   private
   def runJob[T, U: ClassTag](
       rdd: RDD[T],
@@ -2046,6 +2058,7 @@ class SparkContext(config: SparkConf) extends Logging {
     progressBar.foreach(_.finishAll())
     rdd.doCheckpoint()
   }
+
   /**
    * Run a function on a given set of partitions in an RDD and return the results as an array.
    * The function that is run against each partition additionally takes `TaskContext` argument.
@@ -2066,6 +2079,19 @@ class SparkContext(config: SparkConf) extends Logging {
     results
   }
 
+  /**
+    * Create configs on driver using a provided function that accepts an integer as parameter
+    * and then run a job on a given set of partitions in an RDD and return the results in an array.
+    * The function that is run against each partition additionally takes `TaskContext` argument.
+    *
+    * @param rdd target RDD to run tasks on
+    * @param confFunc a function to create configurations on the driver
+    * @param func a function to run on each partition of the RDD
+    * @param partitions set of partitions to run on; some jobs may not want to compute on all
+    * partitions of the target RDD, e.g. for operations like `first()`
+    * @return in-memory collection with a result of the job (each collection element will contain
+    * a result from one partition)
+    */
   private
   def runJob[T, U: ClassTag](
       rdd: RDD[T],
@@ -2108,6 +2134,17 @@ class SparkContext(config: SparkConf) extends Logging {
     runJob(rdd, func, 0 until rdd.partitions.length)
   }
 
+  /**
+    * Create configs on driver using a provided function that accepts an integer as parameter
+    * and then run a job on all partitions in an RDD and return the results in an array.
+    * The function that is run against each partition additionally takes `TaskContext` argument.
+    *
+    * @param rdd target RDD to run tasks on
+    * @param confFunc a function to create configurations on the driver
+    * @param func a function to run on each partition of the RDD
+    * @return in-memory collection with a result of the job (each collection element will contain
+    * a result from one partition)
+    */
   private[spark]
   def runJob[T, U: ClassTag](rdd: RDD[T], confFunc: (Integer) =>
     Unit, func: (TaskContext, Iterator[T]) => U): Array[U] = {

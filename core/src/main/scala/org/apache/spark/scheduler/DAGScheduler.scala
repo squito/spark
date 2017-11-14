@@ -605,6 +605,23 @@ class DAGScheduler(
     waiter
   }
 
+  /**
+    * Submit an action job to the scheduler while create configs on driver using a provide function.
+    *
+    * @param rdd target RDD to run tasks on
+    * @param confFunc a function to create configurations on the driver
+    * @param func a function to run on each partition of the RDD
+    * @param partitions set of partitions to run on; some jobs may not want to compute on all
+    *   partitions of the target RDD, e.g. for operations like first()
+    * @param callSite where in the user program this job was called
+    * @param resultHandler callback to pass each result to
+    * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
+    *
+    * @return a JobWaiter object that can be used to block until the job finishes executing
+    *         or can be used to cancel the job.
+    *
+    * @throws IllegalArgumentException when partitions ids are illegal
+    */
   private[spark]
   def submitJob[T, U](
                        rdd: RDD[T],
@@ -676,6 +693,22 @@ class DAGScheduler(
     }
   }
 
+  /**
+    * Create configurations on the driver using a provided function that accepts an integer as
+    * parameter and Run an action job on the given RDD and pass all the results to the resultHandler
+    * function as they arrive.
+    *
+    * @param rdd target RDD to run tasks on
+    * @param confFunc a function to create configurations on the driver
+    * @param func a function to run on each partition of the RDD
+    * @param partitions set of partitions to run on; some jobs may not want to compute on all
+    *   partitions of the target RDD, e.g. for operations like first()
+    * @param callSite where in the user program this job was called
+    * @param resultHandler callback to pass each result to
+    * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
+    *
+    * @note Throws `Exception` when the job fails
+    */
   private[spark]
   def runJob[T, U](
                     rdd: RDD[T],
@@ -948,6 +981,7 @@ class DAGScheduler(
     submitStage(finalStage)
   }
 
+  // This method is used to handle jobs that contain a closure for setting configurations on driver
   private[scheduler] def handleJobSubmitted(jobId: Int,
                                             finalRDD: RDD[_],
                                             confFunc: (Integer) => Unit,
@@ -960,8 +994,9 @@ class DAGScheduler(
     try {
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
-      confFunc
       finalStage = createResultStage(finalRDD, func, partitions, jobId, callSite)
+
+      // Here since we know the stageId, we can call the provided closure to create configurations
       confFunc(finalStage.id)
     } catch {
       case e: Exception =>

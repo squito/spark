@@ -57,22 +57,7 @@ object SparkHadoopWriter extends Logging {
     // Extract context and configuration from RDD.
     val sparkContext = rdd.context
 
-    // Extract the StageId of the rdd and increase it by one
-    // to determine the StageId of the commitJob
-    // sparkContext.runJob(rdd, (context: TaskContext, iter: Iterator[(K, V)]) => {
-     // stageID.stageId = context.stageId + 1})
-
-    // Set up a job.
-    // val jobTrackerId = createJobTrackerID(new Date())
-    // val jobContext = config.createJobContext(jobTrackerId, stageID.stageId)
-    // config.initOutputFormat(jobContext)
-
-    // Assert the output format/key/value class is set in JobConf.
-    // config.assertConf(jobContext, rdd.conf)
     stageInfo.rddConf = rdd.conf
-
-    // val committer = config.createCommitter(stageID.stageId)
-    // committer.setupJob(jobContext)
 
     // Try to write all RDD partitions as a Hadoop OutputFormat.
     try {
@@ -111,6 +96,7 @@ object SparkHadoopWriter extends Logging {
       logInfo("The config creation is called")
       val committer = config.createCommitter(stageId)
       committer.setupJob(jobContext)
+
       stageInfo.committer = committer
       stageInfo.jobContext = jobContext
       stageInfo.jobTrackerId = jobTrackerId

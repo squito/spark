@@ -24,8 +24,10 @@ import scala.reflect.ClassTag
 import org.apache.hadoop.conf.{Configurable, Configuration}
 import org.apache.hadoop.fs.FileSystem
 import org.apache.hadoop.mapred._
-import org.apache.hadoop.mapreduce.{TaskType, JobContext => NewJobContext, OutputFormat => NewOutputFormat, RecordWriter => NewRecordWriter, TaskAttemptContext => NewTaskAttemptContext, TaskAttemptID => NewTaskAttemptID}
+import org.apache.hadoop.mapreduce.{TaskType, JobContext => NewJobContext, OutputFormat => NewOutputFormat,
+RecordWriter => NewRecordWriter, TaskAttemptContext => NewTaskAttemptContext, TaskAttemptID => NewTaskAttemptID}
 import org.apache.hadoop.mapreduce.task.{TaskAttemptContextImpl => NewTaskAttemptContextImpl}
+
 import org.apache.spark.{SerializableWritable, SparkConf, SparkException, TaskContext}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
@@ -73,7 +75,7 @@ object SparkHadoopWriter extends Logging {
           sparkAttemptNumber = context.attemptNumber,
           committer = stageInfo.committer,
           iterator = iter)
-      })
+      }, 0 until rdd.partitions.length)
       // jobContext = config.createJobContext(stageInfo.jobTrackerId, stageInfo.stageId)
       stageInfo.committer.commitJob(stageInfo.jobContext, ret)
       logInfo(s"Job ${stageInfo.jobContext.getJobID} committed.")

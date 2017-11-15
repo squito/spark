@@ -2011,18 +2011,7 @@ class SparkContext(config: SparkConf) extends Logging {
       func: (TaskContext, Iterator[T]) => U,
       partitions: Seq[Int],
       resultHandler: (Int, U) => Unit): Unit = {
-    if (stopped.get()) {
-      throw new IllegalStateException("SparkContext has been shutdown")
-    }
-    val callSite = getCallSite
-    val cleanedFunc = clean(func)
-    logInfo("Starting job: " + callSite.shortForm)
-    if (conf.getBoolean("spark.logLineage", false)) {
-      logInfo("RDD's recursive dependencies:\n" + rdd.toDebugString)
-    }
-    dagScheduler.runJob(rdd, cleanedFunc, partitions, callSite, resultHandler, localProperties.get)
-    progressBar.foreach(_.finishAll())
-    rdd.doCheckpoint()
+    runJob[T, U](rdd, null, func, partitions, resultHandler)
   }
 
   /**
@@ -2031,7 +2020,9 @@ class SparkContext(config: SparkConf) extends Logging {
     * the given handler function. This is the main entry point for all actions in Spark.
     *
     * @param rdd target RDD to run tasks on
-    * @param confFunc a function to create configurations on the driver
+    * @param jobSetupFunc This function gets called on the driver after the final stage is known.
+    *                     Its primary purpose is as part of the commit protocol, since that needs
+    *                     to know the stageId for creating a unique id. See SparkHadoopWriter
     * @param func a function to run on each partition of the RDD
     * @param partitions set of partitions to run on; some jobs may not want to compute on all
     * partitions of the target RDD, e.g. for operations like `first()`
@@ -2040,7 +2031,7 @@ class SparkContext(config: SparkConf) extends Logging {
   private
   def runJob[T, U: ClassTag](
       rdd: RDD[T],
-      confFunc: (Integer) => Unit,
+      jobSetupFunc: (Integer) => Unit,
       func: (TaskContext, Iterator[T]) => U,
       partitions: Seq[Int],
       resultHandler: (Int, U) => Unit): Unit = {
@@ -2053,7 +2044,7 @@ class SparkContext(config: SparkConf) extends Logging {
     if (conf.getBoolean("spark.logLineage", false)) {
       logInfo("RDD's recursive dependencies:\n" + rdd.toDebugString)
     }
-    dagScheduler.runJob(rdd, confFunc, cleanedFunc, partitions, callSite, resultHandler,
+    dagScheduler.runJob(rdd, jobSetupFunc, cleanedFunc, partitions, callSite, resultHandler,
       localProperties.get)
     progressBar.foreach(_.finishAll())
     rdd.doCheckpoint()
@@ -2074,9 +2065,7 @@ class SparkContext(config: SparkConf) extends Logging {
       rdd: RDD[T],
       func: (TaskContext, Iterator[T]) => U,
       partitions: Seq[Int]): Array[U] = {
-    val results = new Array[U](partitions.size)
-    runJob[T, U](rdd, func, partitions, (index, res) => results(index) = res)
-    results
+    runJob[T, U](rdd, null, func, partitions)
   }
 
   /**
@@ -2085,21 +2074,23 @@ class SparkContext(config: SparkConf) extends Logging {
     * The function that is run against each partition additionally takes `TaskContext` argument.
     *
     * @param rdd target RDD to run tasks on
-    * @param confFunc a function to create configurations on the driver
+    * @param jobSetupFunc This function gets called on the driver after the final stage is known.
+    *                     Its primary purpose is as part of the commit protocol, since that needs
+    *                     to know the stageId for creating a unique id. See SparkHadoopWriter
     * @param func a function to run on each partition of the RDD
     * @param partitions set of partitions to run on; some jobs may not want to compute on all
     * partitions of the target RDD, e.g. for operations like `first()`
     * @return in-memory collection with a result of the job (each collection element will contain
     * a result from one partition)
     */
-  private
+  private[spark]
   def runJob[T, U: ClassTag](
       rdd: RDD[T],
-      confFunc: (Integer) => Unit,
+      jobSetupFunc: (Integer) => Unit,
       func: (TaskContext, Iterator[T]) => U,
       partitions: Seq[Int]): Array[U] = {
     val results = new Array[U](partitions.size)
-    runJob[T, U](rdd, confFunc, func, partitions, (index, res) => results(index) = res)
+    runJob[T, U](rdd, jobSetupFunc, func, partitions, (index, res) => results(index) = res)
     results
   }
 
@@ -2132,24 +2123,6 @@ class SparkContext(config: SparkConf) extends Logging {
    */
   def runJob[T, U: ClassTag](rdd: RDD[T], func: (TaskContext, Iterator[T]) => U): Array[U] = {
     runJob(rdd, func, 0 until rdd.partitions.length)
-  }
-
-  /**
-    * Create configs on driver using a provided function that accepts an integer as parameter
-    * and then run a job on all partitions in an RDD and return the results in an array.
-    * The function that is run against each partition additionally takes `TaskContext` argument.
-    *
-    * @param rdd target RDD to run tasks on
-    * @param confFunc a function to create configurations on the driver
-    * @param func a function to run on each partition of the RDD
-    * @return in-memory collection with a result of the job (each collection element will contain
-    * a result from one partition)
-    */
-  private[spark]
-  def runJob[T, U: ClassTag](rdd: RDD[T], confFunc: (Integer) =>
-    Unit, func: (TaskContext, Iterator[T]) => U): Array[U] = {
-    runJob(rdd, confFunc, func, 0 until rdd.partitions.length)
-
   }
 
   /**

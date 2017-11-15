@@ -37,24 +37,12 @@ private[scheduler] sealed trait DAGSchedulerEvent
 private[scheduler] case class JobSubmitted(
     jobId: Int,
     finalRDD: RDD[_],
+    jobSetupFunction: (Integer) => Unit,
     func: (TaskContext, Iterator[_]) => _,
     partitions: Array[Int],
     callSite: CallSite,
     listener: JobListener,
     properties: Properties = null)
-  extends DAGSchedulerEvent
-
-
-  // A result-yielding job was submitted on a target RDD which also create
-  // configurations on driver usin a provided function that accepts an integer as parameter
-private[scheduler] case class JobSubmittedWithConf(jobId: Int,
-           finalRDD: RDD[_],
-           confFunc: (Integer) => Unit,
-           func: (TaskContext, Iterator[_]) => _,
-           partitions: Array[Int],
-           callSite: CallSite,
-           listener: JobListener,
-           properties: Properties = null)
   extends DAGSchedulerEvent
 
 /** A map stage as submitted to run as a separate job */

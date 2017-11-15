@@ -584,32 +584,33 @@ class DAGScheduler(
       callSite: CallSite,
       resultHandler: (Int, U) => Unit,
       properties: Properties): JobWaiter[U] = {
-     submitJob[T, U](rdd, null, func, partitions, callSite, resultHandler, properties)
+     submitJob[T, U](rdd, (_: Int) => {}, func, partitions, callSite, resultHandler, properties)
   }
 
   /**
-    * Submit an action job to the scheduler while create configs on driver using a provide function.
-    *
-    * @param rdd target RDD to run tasks on
-    * @param jobSetupFunc This function gets called on the driver after the final stage is known.
-    *                     Its primary purpose is as part of the commit protocol, since that needs
-    *                     to know the stageId for creating a unique id. See SparkHadoopWriter
-    * @param func a function to run on each partition of the RDD
-    * @param partitions set of partitions to run on; some jobs may not want to compute on all
-    *   partitions of the target RDD, e.g. for operations like first()
-    * @param callSite where in the user program this job was called
-    * @param resultHandler callback to pass each result to
-    * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
-    *
-    * @return a JobWaiter object that can be used to block until the job finishes executing
-    *         or can be used to cancel the job.
-    *
-    * @throws IllegalArgumentException when partitions ids are illegal
-    */
+   * Create configs on driver as part of commit protocol using a provided function that accepts
+   * an integer (stageId) as parameter and then Submit an action job to the scheduler
+   *
+   * @param rdd target RDD to run tasks on
+   * @param jobSetupFunc This function gets called on the driver after the final stage is known.
+   *   Its primary purpose is as part of the commit protocol, since that needs
+   *   to know the stageId for creating a unique id. See SparkHadoopWriter
+   * @param func a function to run on each partition of the RDD
+   * @param partitions set of partitions to run on; some jobs may not want to compute on all
+   *   partitions of the target RDD, e.g. for operations like first()
+   * @param callSite where in the user program this job was called
+   * @param resultHandler callback to pass each result to
+   * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
+   *
+   * @return a JobWaiter object that can be used to block until the job finishes executing
+   *         or can be used to cancel the job.
+   *
+   * @throws IllegalArgumentException when partitions ids are illegal
+   */
   private[spark]
   def submitJob[T, U](
       rdd: RDD[T],
-      jobSetupFunc: (Integer) => Unit,
+      jobSetupFunc: Int => Unit,
       func: (TaskContext, Iterator[T]) => U,
       partitions: Seq[Int],
       callSite: CallSite,
@@ -659,46 +660,46 @@ class DAGScheduler(
       callSite: CallSite,
       resultHandler: (Int, U) => Unit,
       properties: Properties): Unit = {
-    runJob[T, U](rdd, null, func, partitions, callSite, resultHandler, properties)
+    runJob[T, U](rdd, (_: Int) => {}, func, partitions, callSite, resultHandler, properties)
   }
 
   /**
-    * Create configurations on the driver using a provided function that accepts an integer as
-    * parameter and Run an action job on the given RDD and pass all the results to the resultHandler
-    * function as they arrive.
-    *
-    * @param rdd target RDD to run tasks on
-    * @param jobSetupFunc This function gets called on the driver after the final stage is known.
-    *                     Its primary purpose is as part of the commit protocol, since that needs
-    *                     to know the stageId for creating a unique id. See SparkHadoopWriter
-    * @param func a function to run on each partition of the RDD
-    * @param partitions set of partitions to run on; some jobs may not want to compute on all
-    *   partitions of the target RDD, e.g. for operations like first()
-    * @param callSite where in the user program this job was called
-    * @param resultHandler callback to pass each result to
-    * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
-    *
-    * @note Throws `Exception` when the job fails
-    */
+   * Create configs on driver as part of commit protocol using a provided function that accepts
+   * an integer (stageId) as parameter and then run an action job on the given RDD and pass all
+   * the results to the resultHandler function as they arrive.
+   *
+   * @param rdd target RDD to run tasks on
+   * @param jobSetupFunc This function gets called on the driver after the final stage is known.
+   * Its primary purpose is as part of the commit protocol, since that needs
+   * to know the stageId for creating a unique id. See SparkHadoopWriter
+   * @param func a function to run on each partition of the RDD
+   * @param partitions set of partitions to run on; some jobs may not want to compute on all
+   *   partitions of the target RDD, e.g. for operations like first()
+   * @param callSite where in the user program this job was called
+   * @param resultHandler callback to pass each result to
+   * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
+   *
+   * @note Throws `Exception` when the job fails
+   */
   private[spark]
   def runJob[T, U](
-                    rdd: RDD[T],
-                    jobSetupFunc: (Integer) => Unit,
-                    func: (TaskContext, Iterator[T]) => U,
-                    partitions: Seq[Int],
-                    callSite: CallSite,
-                    resultHandler: (Int, U) => Unit,
-                    properties: Properties): Unit = {
+      rdd: RDD[T],
+      jobSetupFunc: Int => Unit,
+      func: (TaskContext, Iterator[T]) => U,
+      partitions: Seq[Int],
+      callSite: CallSite,
+      resultHandler: (Int, U) => Unit,
+      properties: Properties): Unit = {
     val start = System.nanoTime
     val waiter = submitJob(rdd, jobSetupFunc, func, partitions, callSite, resultHandler, properties)
     ThreadUtils.awaitReady(waiter.completionFuture, Duration.Inf)
     waiter.completionFuture.value.get match {
       case scala.util.Success(_) =>
         logInfo("Job %d finished: %s, took %f s".format
-        (waiter.jobId, callSite.shortForm, (System.nanoTime - start) / 1e9))
+          (waiter.jobId, callSite.shortForm, (System.nanoTime - start) / 1e9))
       case scala.util.Failure(exception) =>
         logInfo("Job %d failed: %s, took %f s".format
-        (waiter.jobId, callSite.shortForm, (System.nanoTime - start) / 1e9))
+          (waiter.jobId, callSite.shortForm, (System.nanoTime - start) / 1e9))
         // SPARK-8644: Include user stack trace in exceptions coming from DAGScheduler.
         val callerStackTrace = Thread.currentThread().getStackTrace.tail
         exception.setStackTrace(exception.getStackTrace ++ callerStackTrace)
@@ -729,7 +730,7 @@ class DAGScheduler(
     val partitions = (0 until rdd.partitions.length).toArray
     val jobId = nextJobId.getAndIncrement()
     eventProcessLoop.post(JobSubmitted(
-      jobId, rdd, null, func2, partitions, callSite, listener,
+      jobId, rdd, (_: Int) => {}, func2, partitions, callSite, listener,
       SerializationUtils.clone(properties)))
     listener.awaitResult()    // Will throw an exception if the job fails
   }
@@ -916,7 +917,7 @@ class DAGScheduler(
 
   private[scheduler] def handleJobSubmitted(jobId: Int,
       finalRDD: RDD[_],
-      jobSetupFunc: (Integer) => Unit,
+      jobSetupFunc: Int => Unit,
       func: (TaskContext, Iterator[_]) => _,
       partitions: Array[Int],
       callSite: CallSite,
@@ -927,8 +928,7 @@ class DAGScheduler(
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
       finalStage = createResultStage(finalRDD, func, partitions, jobId, callSite)
-      if (jobSetupFunc != null) {
-        jobSetupFunc(finalStage.id) }
+      jobSetupFunc(finalStage.id)
     } catch {
       case e: Exception =>
         logWarning("Creating new stage failed due to exception - job: " + jobId, e)

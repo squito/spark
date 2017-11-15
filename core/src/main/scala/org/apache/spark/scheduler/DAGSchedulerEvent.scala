@@ -37,7 +37,7 @@ private[scheduler] sealed trait DAGSchedulerEvent
 private[scheduler] case class JobSubmitted(
     jobId: Int,
     finalRDD: RDD[_],
-    jobSetupFunction: (Integer) => Unit,
+    jobSetupFunction: Int => Unit,
     func: (TaskContext, Iterator[_]) => _,
     partitions: Array[Int],
     callSite: CallSite,

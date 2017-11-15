@@ -21,11 +21,13 @@ import java.text.NumberFormat
 import java.util.{Date, Locale}
 
 import scala.reflect.ClassTag
+
 import org.apache.hadoop.conf.{Configurable, Configuration}
 import org.apache.hadoop.fs.FileSystem
 import org.apache.hadoop.mapred._
-import org.apache.hadoop.mapreduce.{TaskType, JobContext => NewJobContext, OutputFormat => NewOutputFormat,
-RecordWriter => NewRecordWriter, TaskAttemptContext => NewTaskAttemptContext, TaskAttemptID => NewTaskAttemptID}
+import org.apache.hadoop.mapreduce.{JobContext => NewJobContext, OutputFormat => NewOutputFormat,
+ RecordWriter => NewRecordWriter, TaskAttemptContext => NewTaskAttemptContext,
+TaskAttemptID => NewTaskAttemptID, TaskType}
 import org.apache.hadoop.mapreduce.task.{TaskAttemptContextImpl => NewTaskAttemptContextImpl}
 
 import org.apache.spark.{SerializableWritable, SparkConf, SparkException, TaskContext}
@@ -45,7 +47,9 @@ object SparkHadoopWriter extends Logging {
   /**
    * Basic work flow of this command is:
    * 1. Driver side setup, prepare the data source and hadoop configuration for the write job to
-   *    be issued.
+   *    be issued. To create the configurations we also need stageId. However since info about
+   *    stageId is not available yet, we need a closure to create configs that will be run on
+   *    driver when the stageId is available in DAGScheduler.
    * 2. Issues a write job consists of one or more executor side tasks, each of which writes all
    *    rows within an RDD partition.
    * 3. If no exception is thrown in a task, commits that task, otherwise aborts that task;  If any
@@ -53,7 +57,6 @@ object SparkHadoopWriter extends Logging {
    * 4. If all tasks are committed, commit the job, otherwise aborts the job;  If any exception is
    *    thrown during job commitment, also aborts the job.
    */
-
   def write[K, V: ClassTag](
       rdd: RDD[(K, V)],
       config: HadoopWriteConfigUtil[K, V]): Unit = {
@@ -63,8 +66,7 @@ object SparkHadoopWriter extends Logging {
     stageInfo.rddConf = rdd.conf
     // Try to write all RDD partitions as a Hadoop OutputFormat.
     try {
-      val ret = sparkContext.runJob(rdd, (stageId: Integer) => {
-        createConf( stageInfo = stageInfo, stageId, config = config)},
+      val ret = sparkContext.runJob(rdd, createConf( stageInfo, _, config),
         (context: TaskContext, iter: Iterator[(K, V)]) => {
         executeTask(
           context = context,
@@ -76,21 +78,24 @@ object SparkHadoopWriter extends Logging {
           committer = stageInfo.committer,
           iterator = iter)
       }, 0 until rdd.partitions.length)
-      // jobContext = config.createJobContext(stageInfo.jobTrackerId, stageInfo.stageId)
+
       stageInfo.committer.commitJob(stageInfo.jobContext, ret)
       logInfo(s"Job ${stageInfo.jobContext.getJobID} committed.")
     } catch {
       case cause: Throwable =>
-        // if (jobContext == null) {
-        //  jobContext = config.createJobContext(stageInfo.jobTrackerId, stageInfo.stageId)}
         logError(s"Aborting job ${stageInfo.jobContext.getJobID}.", cause)
         stageInfo.committer.abortJob(stageInfo.jobContext)
         throw new SparkException("Job aborted.", cause)
     }
   }
 
+  /**
+   * This function gets called on the driver after the final stage is known.
+   * Its primary purpose is as part of the commit protocol, since it needs
+   * to know the stageId for creating a unique id. See SparkHadoopWriter
+   */
   private def createConf[K, V: ClassTag](stageInfo: StageInfo,
-                                         stageId: Integer,
+                                         stageId: Int,
                                          config: HadoopWriteConfigUtil[K, V]): Unit = {
       val jobTrackerId = createJobTrackerID(new Date())
       val jobContext = config.createJobContext(jobTrackerId, stageId)
@@ -98,7 +103,6 @@ object SparkHadoopWriter extends Logging {
 
       // Assert the output format/key/value class is set in JobConf.
       config.assertConf(jobContext, stageInfo.rddConf)
-      logInfo("The config creation is called")
       val committer = config.createCommitter(stageId)
       committer.setupJob(jobContext)
 
@@ -400,41 +404,12 @@ class HadoopMapReduceWriteConfigUtil[K, V: ClassTag](conf: SerializableConfigura
   }
 }
 
+private[spark]
 class StageInfo extends Serializable {
-  private[this] var _committer: HadoopMapReduceCommitProtocol = null
-  @transient
-  private[this] var _jobContext: NewJobContext = null
-  private[this] var _stageId: Integer = 0
-  private[this] var _rddConf: SparkConf = null
-  private[this] var _jobTrackerId: String = ""
-
-  def jobTrackerId: String = _jobTrackerId
-
-  def jobTrackerId_=(value: String): Unit = {
-    _jobTrackerId = value
-  }
-
-  def rddConf: SparkConf = _rddConf
-
-  def rddConf_=(value: SparkConf): Unit = {
-    _rddConf = value
-  }
-
-  def stageId: Integer = _stageId
-
-  def stageId_=(value: Integer): Unit = {
-    _stageId = value
-  }
-
-  def jobContext: NewJobContext = _jobContext
-
-  def jobContext_=(value: NewJobContext): Unit = {
-    _jobContext = value
-  }
-
-  def committer: HadoopMapReduceCommitProtocol = _committer
-
-  def committer_=(value: HadoopMapReduceCommitProtocol): Unit = {
-    _committer = value
-  }
+   var committer: HadoopMapReduceCommitProtocol = null
+   @transient
+   var jobContext: NewJobContext = null
+   var stageId: Integer = 0
+   var rddConf: SparkConf = null
+   var jobTrackerId: String = ""
 }

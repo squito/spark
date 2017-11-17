@@ -83,7 +83,6 @@ private[spark] class ResultTask[T, U](
     _executorDeserializeCpuTime = if (threadMXBean.isCurrentThreadCpuTimeSupported) {
       threadMXBean.getCurrentThreadCpuTime - deserializeStartCpuTime
     } else 0L
-
     func(context, rdd.iterator(partition, context))
   }
 

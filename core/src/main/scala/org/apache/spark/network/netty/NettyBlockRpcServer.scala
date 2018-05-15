@@ -28,7 +28,8 @@ import org.apache.spark.network.BlockDataManager
 import org.apache.spark.network.buffer.NioManagedBuffer
 import org.apache.spark.network.client.{RpcResponseCallback, TransportClient}
 import org.apache.spark.network.server.{OneForOneStreamManager, RpcHandler, StreamData, StreamManager}
-import org.apache.spark.network.shuffle.protocol.{BlockTransferMessage, OpenBlocks, StreamHandle, UploadBlock}
+import org.apache.spark.network.shuffle.protocol._
+import org.apache.spark.network.util.TransportConf
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.storage.{BlockId, StorageLevel}
 
@@ -42,7 +43,8 @@ import org.apache.spark.storage.{BlockId, StorageLevel}
 class NettyBlockRpcServer(
     appId: String,
     serializer: Serializer,
-    blockManager: BlockDataManager)
+    blockManager: BlockDataManager,
+    private val transportConf: TransportConf)
   extends RpcHandler with Logging {
 
   private val streamManager = new OneForOneStreamManager()
@@ -57,6 +59,7 @@ class NettyBlockRpcServer(
 
     message match {
       case openBlocks: OpenBlocks =>
+        assert(streamData == null)
         val blocksNum = openBlocks.blockIds.length
         val blocks = for (i <- (0 until blocksNum).view)
           yield blockManager.getBlockData(BlockId.apply(openBlocks.blockIds(i)))
@@ -65,6 +68,7 @@ class NettyBlockRpcServer(
         responseContext.onSuccess(new StreamHandle(streamId, blocksNum).toByteBuffer)
 
       case uploadBlock: UploadBlock =>
+        assert(streamData == null)
         // StorageLevel and ClassTag are serialized as bytes using our JavaSerializer.
         val (level: StorageLevel, classTag: ClassTag[_]) = {
           serializer
@@ -74,8 +78,24 @@ class NettyBlockRpcServer(
         }
         val data = new NioManagedBuffer(ByteBuffer.wrap(uploadBlock.blockData))
         val blockId = BlockId(uploadBlock.blockId)
+        logInfo(s"Receiving replicated block $blockId with level ${level} " +
+          s"from ${client.getSocketAddress}")
         blockManager.putBlockData(blockId, data, level, classTag)
         responseContext.onSuccess(ByteBuffer.allocate(0))
+      case uploadBlockStream: UploadBlockStream =>
+        assert(streamData != null)
+       val (level: StorageLevel, classTag: ClassTag[_]) = {
+          serializer
+            .newInstance()
+            .deserialize(ByteBuffer.wrap(uploadBlockStream.metadata))
+            .asInstanceOf[(StorageLevel, ClassTag[_])]
+        }
+        val blockId = BlockId(uploadBlockStream.blockId)
+        logInfo(s"Receiving replicated block $blockId with level ${level} as stream " +
+          s"from ${client.getSocketAddress}")
+        // This will return immediately, but will setup a callback on streamData which will still
+        // do all the processing in the netty thread.
+        blockManager.putBlockData(blockId, streamData, level, classTag, transportConf)
     }
   }
 

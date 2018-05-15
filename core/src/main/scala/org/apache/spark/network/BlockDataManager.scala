@@ -20,6 +20,8 @@ package org.apache.spark.network
 import scala.reflect.ClassTag
 
 import org.apache.spark.network.buffer.ManagedBuffer
+import org.apache.spark.network.server.StreamData
+import org.apache.spark.network.util.TransportConf
 import org.apache.spark.storage.{BlockId, StorageLevel}
 
 private[spark]
@@ -42,6 +44,19 @@ trait BlockDataManager {
       data: ManagedBuffer,
       level: StorageLevel,
       classTag: ClassTag[_]): Boolean
+
+  /**
+   * Put the given block that will be received as a stream.
+   *
+   * When this method is called, the data itself is not available -- it needs to be handled within
+   * the callbacks of <code>streamData</code>.
+   */
+  def putBlockData(
+      blockId: BlockId,
+      streamData: StreamData,
+      level: StorageLevel,
+      classTag: ClassTag[_],
+      transportConf: TransportConf): Unit
 
   /**
    * Release locks acquired by [[putBlockData()]] and [[getBlockData()]].

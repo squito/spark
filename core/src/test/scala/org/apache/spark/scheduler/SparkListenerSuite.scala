@@ -26,6 +26,7 @@ import org.scalatest.Matchers
 
 import org.apache.spark._
 import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.internal.config._
 import org.apache.spark.util.{ResetSystemProperties, RpcUtils}
 
 class SparkListenerSuite extends SparkFunSuite with LocalSparkContext with Matchers
@@ -388,6 +389,24 @@ class SparkListenerSuite extends SparkFunSuite with LocalSparkContext with Match
         .count(_.isInstanceOf[FirehoseListenerThatAcceptsSparkConf]) should be (1)
   }
 
+  test("interrupt within listener is handled correctly") {
+    val conf = new SparkConf(false)
+      .set(LISTENER_BUS_EVENT_QUEUE_SIZE, 5)
+    sc = new SparkContext("local", "SparkListenerSuite", new SparkConf())
+    val bus = new LiveListenerBus(sc)
+    val counter1 = new BasicJobCounter()
+    val counter2 = new BasicJobCounter()
+    val interruptingListener = new InterruptingListener
+    bus.addListener(counter1)
+    bus.addListener(interruptingListener)
+    bus.start()
+
+    // after we post one event, the shared queue should get stopped because of the interrupt
+    bus.post(SparkListenerJobEnd(0, jobCompletionTime, JobSucceeded))
+    bus.waitUntilEmpty(WAIT_TIMEOUT_MILLIS)
+    assert(!sc.isStopped)
+  }
+
   /**
    * Assert that the given list of numbers has an average that is greater than zero.
    */
@@ -446,6 +465,14 @@ class SparkListenerSuite extends SparkFunSuite with LocalSparkContext with Match
     override def onJobEnd(jobEnd: SparkListenerJobEnd): Unit = { throw new Exception }
   }
 
+  /**
+   * A simple listener that interrupts on job end.
+   */
+  private class InterruptingListener extends SparkListener {
+    override def onJobEnd(jobEnd: SparkListenerJobEnd): Unit = {
+      Thread.currentThread().interrupt()
+    }
+  }
 }
 
 // These classes can't be declared inside of the SparkListenerSuite class because we don't want

@@ -379,7 +379,8 @@ private[spark] class BlockManager(
     } else {
       getLocalBytes(blockId) match {
         case Some(blockData) =>
-          new BlockManagerManagedBuffer(blockInfoManager, blockId, blockData, true)
+          new BlockManagerManagedBuffer(blockInfoManager, blockId, blockData, true,
+            unlockOnDeallocate = true)
         case None =>
           // If this block manager receives a request for a block that it doesn't have then it's
           // likely that the master has outdated block statuses for this block. Therefore, we send

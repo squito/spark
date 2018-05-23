@@ -39,7 +39,7 @@ private[storage] class BlockManagerManagedBuffer(
     blockId: BlockId,
     data: BlockData,
     dispose: Boolean,
-    unlockOnDeallocate: Boolean = true) extends ManagedBuffer {
+    unlockOnDeallocate: Boolean) extends ManagedBuffer {
 
   private val refCount = new AtomicInteger(1)
 

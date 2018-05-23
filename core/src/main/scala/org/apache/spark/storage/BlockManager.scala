@@ -702,6 +702,11 @@ private[spark] class BlockManager(
    * Get block from remote block managers as serialized bytes.
    */
   def getRemoteBytes(blockId: BlockId): Option[ChunkedByteBuffer] = {
+    // TODO if we change this method to return the ManagedBuffer, then getRemoteValues
+    // could just use the inputStream on the temp file, rather than memory-mapping the file.
+    // Until then, replication can go cause the process to use too much memory and get killed
+    // by the OS / cluster manager (not a java OOM, since its a memory-mapped file) even though
+    // we've read the data to disk.
     logDebug(s"Getting remote block $blockId")
     require(blockId != null, "BlockId is null")
     var runningFailureCount = 0
@@ -732,7 +737,7 @@ private[spark] class BlockManager(
       logDebug(s"Getting remote block $blockId from $loc")
       val data = try {
         blockTransferService.fetchBlockSync(
-          loc.host, loc.port, loc.executorId, blockId.toString, tempFileManager).nioByteBuffer()
+          loc.host, loc.port, loc.executorId, blockId.toString, tempFileManager)
       } catch {
         case NonFatal(e) =>
           runningFailureCount += 1
@@ -766,7 +771,9 @@ private[spark] class BlockManager(
       }
 
       if (data != null) {
-        return Some(new ChunkedByteBuffer(data))
+        val chunkSize =
+          conf.getSizeAsBytes("spark.storage.memoryMapLimitForTests", Int.MaxValue.toString).toInt
+        return Some(ChunkedByteBuffer.fromManagedBuffer(data, chunkSize))
       }
       logDebug(s"The value of block $blockId is null")
     }

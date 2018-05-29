@@ -31,7 +31,7 @@ import org.slf4j.LoggerFactory;
  * This encoder is stateless so it is safe to be shared by multiple threads.
  */
 @ChannelHandler.Sharable
-public final class MessageDecoder extends MessageToMessageDecoder<ByteBuf> {
+public final class MessageDecoder extends MessageToMessageDecoder<ParsedFrame> {
 
   private static final Logger logger = LoggerFactory.getLogger(MessageDecoder.class);
 
@@ -40,21 +40,20 @@ public final class MessageDecoder extends MessageToMessageDecoder<ByteBuf> {
   private MessageDecoder() {}
 
   @Override
-  public void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
-    Message.Type msgType = Message.Type.decode(in);
-    Message decoded = decode(msgType, in);
-    assert decoded.type() == msgType;
-    logger.trace("Received message {}: {}", msgType, decoded);
+  public void decode(ChannelHandlerContext ctx, ParsedFrame in, List<Object> out) {
+    Message decoded = decode(in.messageType, in.byteBuf, in.remainingFrameSize);
+    assert decoded.type() == in.messageType;
+    logger.trace("Received message {}: {}", in.messageType, decoded);
     out.add(decoded);
   }
 
-  private Message decode(Message.Type msgType, ByteBuf in) {
+  private Message decode(Message.Type msgType, ByteBuf in, long remainingFrameSize) {
     switch (msgType) {
       case ChunkFetchRequest:
         return ChunkFetchRequest.decode(in);
 
       case ChunkFetchSuccess:
-        return ChunkFetchSuccess.decode(in);
+        return ChunkFetchSuccess.decode(in, remainingFrameSize);
 
       case ChunkFetchFailure:
         return ChunkFetchFailure.decode(in);

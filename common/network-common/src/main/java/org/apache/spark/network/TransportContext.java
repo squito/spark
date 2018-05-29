@@ -146,7 +146,8 @@ public class TransportContext {
       TransportChannelHandler channelHandler = createChannelHandler(channel, channelRpcHandler);
       channel.pipeline()
         .addLast("encoder", ENCODER)
-        .addLast(TransportFrameDecoder.HANDLER_NAME, NettyUtils.createFrameDecoder())
+        .addLast(TransportFrameDecoder.HANDLER_NAME,
+          NettyUtils.createFrameDecoder(conf.maxRemoteBlockSizeFetchToMem()))
         .addLast("decoder", DECODER)
         .addLast("idleStateHandler", new IdleStateHandler(0, 0, conf.connectionTimeoutMs() / 1000))
         // NOTE: Chunks are currently guaranteed to be returned in the order of request, but this

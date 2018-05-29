@@ -25,6 +25,9 @@ import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import org.apache.spark.network.protocol.ChunkFetchSuccess;
+import org.apache.spark.network.protocol.Message;
+import org.apache.spark.network.protocol.ParsedFrame;
 
 /**
  * A customized frame decoder that allows intercepting raw data.
@@ -55,6 +58,13 @@ public class TransportFrameDecoder extends ChannelInboundHandlerAdapter {
   private long totalSize = 0;
   private long nextFrameSize = UNKNOWN_FRAME_SIZE;
   private volatile Interceptor interceptor;
+  private Message.Type msgType = null;
+
+  private final long maxRemoteBlockSizeFetchToMem;
+
+  public TransportFrameDecoder(long maxRemoteBlockSizeFetchToMem) {
+    this.maxRemoteBlockSizeFetchToMem = maxRemoteBlockSizeFetchToMem;
+  }
 
   @Override
   public void channelRead(ChannelHandlerContext ctx, Object data) throws Exception {
@@ -78,11 +88,25 @@ public class TransportFrameDecoder extends ChannelInboundHandlerAdapter {
         totalSize -= read;
       } else {
         // Interceptor is not active, so try to decode one frame.
+        decodeNextMsgType();
+        if (msgType == null) {
+          break;
+        }
+        long remainingFrameSize = 0;
+        if (msgType == Message.Type.ChunkFetchSuccess &&
+            nextFrameSize - ChunkFetchSuccess.ENCODED_LENGTH > maxRemoteBlockSizeFetchToMem) {
+            remainingFrameSize = nextFrameSize - ChunkFetchSuccess.ENCODED_LENGTH;
+            nextFrameSize = ChunkFetchSuccess.ENCODED_LENGTH;
+        }
+
         ByteBuf frame = decodeNext();
         if (frame == null) {
           break;
         }
-        ctx.fireChannelRead(frame);
+        ParsedFrame parsedFrame =
+          new ParsedFrame(msgType, frame, remainingFrameSize);
+        msgType = null;
+        ctx.fireChannelRead(parsedFrame);
       }
     }
   }
@@ -121,17 +145,39 @@ public class TransportFrameDecoder extends ChannelInboundHandlerAdapter {
     return nextFrameSize;
   }
 
-  private ByteBuf decodeNext() {
+  private void decodeNextMsgType() {
+    if (msgType != null) {
+      return;
+    }
     long frameSize = decodeFrameSize();
-    if (frameSize == UNKNOWN_FRAME_SIZE || totalSize < frameSize) {
+    if (frameSize == UNKNOWN_FRAME_SIZE) {
+      return;
+    }
+
+    Preconditions.checkArgument(frameSize < MAX_FRAME_SIZE, "Too large frame: %s", frameSize);
+    Preconditions.checkArgument(frameSize > 0, "Frame length should be positive: %s", frameSize);
+
+    if(totalSize < Message.Type.LENGTH) {
+      return;
+    }
+
+    ByteBuf first = buffers.getFirst();
+    msgType = Message.Type.decode(first);
+    totalSize -= Message.Type.LENGTH;
+    nextFrameSize -= Message.Type.LENGTH;
+    if (!first.isReadable()) {
+      buffers.removeFirst().release();
+    }
+  }
+
+  private ByteBuf decodeNext() {
+    long frameSize = nextFrameSize;
+    if (totalSize < frameSize) {
       return null;
     }
 
     // Reset size for next frame.
     nextFrameSize = UNKNOWN_FRAME_SIZE;
-
-    Preconditions.checkArgument(frameSize < MAX_FRAME_SIZE, "Too large frame: %s", frameSize);
-    Preconditions.checkArgument(frameSize > 0, "Frame length should be positive: %s", frameSize);
 
     // If the first buffer holds the entire frame, return it.
     int remaining = (int) frameSize;

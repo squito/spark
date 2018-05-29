@@ -68,7 +68,8 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
       execId: String,
       blockIds: Array[String],
       listener: BlockFetchingListener,
-      tempFileManager: TempFileManager): Unit
+      tempFileManager: TempFileManager,
+      useStreamRequestMessage: Boolean): Unit
 
   /**
    * Upload a single block to a remote node, available only after [[init]] is invoked.
@@ -92,7 +93,8 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
       port: Int,
       execId: String,
       blockId: String,
-      tempFileManager: TempFileManager): ManagedBuffer = {
+      tempFileManager: TempFileManager,
+      useStreamRequestMessage: Boolean): ManagedBuffer = {
     // A monitor for the thread to wait on.
     val result = Promise[ManagedBuffer]()
     fetchBlocks(host, port, execId, Array(blockId),
@@ -111,7 +113,9 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
               result.success(new NioManagedBuffer(ret))
           }
         }
-      }, tempFileManager)
+      },
+      tempFileManager,
+      useStreamRequestMessage)
     ThreadUtils.awaitResult(result.future, Duration.Inf)
   }
 

@@ -132,7 +132,7 @@ public class TransportClient implements Closeable {
   public void fetchChunk(
       long streamId,
       int chunkIndex,
-      ChunkReceivedCallback callback) {
+      ChunkReceivedWithStreamCallback callback) {
     long startTime = System.currentTimeMillis();
     if (logger.isDebugEnabled()) {
       logger.debug("Sending fetch chunk request {} to {}", chunkIndex, getRemoteAddress(channel));
@@ -169,7 +169,7 @@ public class TransportClient implements Closeable {
    * @param streamId The stream to fetch.
    * @param callback Object to call with the stream data.
    */
-  public void stream(String streamId, StreamCallback callback) {
+  public void stream(String streamId, StreamCallback<String> callback) {
     long startTime = System.currentTimeMillis();
     if (logger.isDebugEnabled()) {
       logger.debug("Sending stream request for {} to {}", streamId, getRemoteAddress(channel));

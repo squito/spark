@@ -86,12 +86,13 @@ public class ExternalShuffleClient extends ShuffleClient {
 
   @Override
   public void fetchBlocks(
-      String host,
-      int port,
-      String execId,
-      String[] blockIds,
-      BlockFetchingListener listener,
-      TempFileManager tempFileManager) {
+          String host,
+          int port,
+          String execId,
+          String[] blockIds,
+          BlockFetchingListener listener,
+          TempFileManager tempFileManager,
+          boolean useStreamRequestMessage) {
     checkInit();
     logger.debug("External shuffle fetch from {}:{} (executor id {})", host, port, execId);
     try {
@@ -99,7 +100,7 @@ public class ExternalShuffleClient extends ShuffleClient {
           (blockIds1, listener1) -> {
             TransportClient client = clientFactory.createClient(host, port);
             new OneForOneBlockFetcher(client, appId, execId,
-              blockIds1, listener1, conf, tempFileManager).start();
+              blockIds1, listener1, conf, tempFileManager, useStreamRequestMessage).start();
           };
 
       int maxRetries = conf.maxIORetries();

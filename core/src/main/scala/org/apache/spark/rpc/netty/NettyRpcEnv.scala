@@ -407,7 +407,7 @@ private[netty] class NettyRpcEnv(
   private class FileDownloadCallback(
       sink: WritableByteChannel,
       source: FileDownloadChannel,
-      client: TransportClient) extends StreamCallback {
+      client: TransportClient) extends StreamCallback[String] {
 
     override def onData(streamId: String, buf: ByteBuffer): Unit = {
       while (buf.remaining() > 0) {

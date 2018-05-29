@@ -44,16 +44,13 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
+import org.apache.spark.network.client.*;
 import org.junit.Test;
 
 import org.apache.spark.network.TestUtils;
 import org.apache.spark.network.TransportContext;
 import org.apache.spark.network.buffer.FileSegmentManagedBuffer;
 import org.apache.spark.network.buffer.ManagedBuffer;
-import org.apache.spark.network.client.ChunkReceivedCallback;
-import org.apache.spark.network.client.RpcResponseCallback;
-import org.apache.spark.network.client.TransportClient;
-import org.apache.spark.network.client.TransportClientBootstrap;
 import org.apache.spark.network.server.RpcHandler;
 import org.apache.spark.network.server.StreamManager;
 import org.apache.spark.network.server.TransportServer;
@@ -273,7 +270,7 @@ public class SparkSaslSuite {
 
       CountDownLatch lock = new CountDownLatch(1);
 
-      ChunkReceivedCallback callback = mock(ChunkReceivedCallback.class);
+      ChunkReceivedWithStreamCallback callback = mock(ChunkReceivedWithStreamCallback.class);
       doAnswer(invocation -> {
         response.set((ManagedBuffer) invocation.getArguments()[1]);
         response.get().retain();

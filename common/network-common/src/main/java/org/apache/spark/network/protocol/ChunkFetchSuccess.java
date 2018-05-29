@@ -31,11 +31,23 @@ import org.apache.spark.network.buffer.NettyManagedBuffer;
  * Similarly, the client-side decoding will reuse the Netty ByteBuf as the buffer.
  */
 public final class ChunkFetchSuccess extends AbstractResponseMessage {
+  public static final int ENCODED_LENGTH = StreamChunkId.ENCODED_LENGTH;
   public final StreamChunkId streamChunkId;
+  public final long remainingFrameSize;
 
   public ChunkFetchSuccess(StreamChunkId streamChunkId, ManagedBuffer buffer) {
     super(buffer, true);
     this.streamChunkId = streamChunkId;
+    this.remainingFrameSize = 0;
+  }
+
+  public ChunkFetchSuccess(StreamChunkId streamChunkId,
+                           ManagedBuffer buffer,
+                           boolean isBodyInFrame,
+                           long remainingFrameSize) {
+    super(buffer, isBodyInFrame);
+    this.streamChunkId = streamChunkId;
+    this.remainingFrameSize = remainingFrameSize;
   }
 
   @Override
@@ -58,11 +70,16 @@ public final class ChunkFetchSuccess extends AbstractResponseMessage {
   }
 
   /** Decoding uses the given ByteBuf as our data, and will retain() it. */
-  public static ChunkFetchSuccess decode(ByteBuf buf) {
+  public static ChunkFetchSuccess decode(ByteBuf buf, long remainingFrameSize) {
     StreamChunkId streamChunkId = StreamChunkId.decode(buf);
-    buf.retain();
-    NettyManagedBuffer managedBuf = new NettyManagedBuffer(buf.duplicate());
-    return new ChunkFetchSuccess(streamChunkId, managedBuf);
+    NettyManagedBuffer managedBuf = null;
+    final boolean isFullFrameProcessed =
+      remainingFrameSize == 0;
+    if (isFullFrameProcessed) {
+      buf.retain();
+      managedBuf = new NettyManagedBuffer(buf.duplicate());
+    }
+    return new ChunkFetchSuccess(streamChunkId, managedBuf, isFullFrameProcessed, remainingFrameSize);
   }
 
   @Override

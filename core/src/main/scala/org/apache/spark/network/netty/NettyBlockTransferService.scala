@@ -100,19 +100,19 @@ private[spark] class NettyBlockTransferService(
   }
 
   override def fetchBlocks(
-      host: String,
-      port: Int,
+      host: String, port: Int,
       execId: String,
       blockIds: Array[String],
       listener: BlockFetchingListener,
-      tempFileManager: TempFileManager): Unit = {
+      tempFileManager: TempFileManager,
+      useStreamRequestMessage: Boolean): Unit = {
     logTrace(s"Fetch blocks from $host:$port (executor id $execId)")
     try {
       val blockFetchStarter = new RetryingBlockFetcher.BlockFetchStarter {
         override def createAndStart(blockIds: Array[String], listener: BlockFetchingListener) {
           val client = clientFactory.createClient(host, port)
           new OneForOneBlockFetcher(client, appId, execId, blockIds, listener,
-            transportConf, tempFileManager).start()
+            transportConf, tempFileManager, useStreamRequestMessage).start()
         }
       }
 

@@ -61,7 +61,7 @@ class SaslEncryption {
     channel.pipeline()
       .addFirst(ENCRYPTION_HANDLER_NAME, new EncryptionHandler(backend, maxOutboundBlockSize))
       .addFirst("saslDecryption", new DecryptionHandler(backend))
-      .addFirst("saslFrameDecoder", NettyUtils.createFrameDecoder());
+      .addFirst("saslFrameDecoder", NettyUtils.createFrameDecoder(Integer.MAX_VALUE));
   }
 
   private static class EncryptionHandler extends ChannelOutboundHandlerAdapter {

@@ -54,7 +54,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
 
   private final Channel channel;
 
-  private final Map<StreamChunkId, ChunkReceivedCallback> outstandingFetches;
+  private final Map<StreamChunkId, ChunkReceivedWithStreamCallback> outstandingFetches;
 
   private final Map<Long, RpcResponseCallback> outstandingRpcs;
 
@@ -72,7 +72,9 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
     this.timeOfLastRequestNs = new AtomicLong(0);
   }
 
-  public void addFetchRequest(StreamChunkId streamChunkId, ChunkReceivedCallback callback) {
+  public void addFetchRequest(
+      StreamChunkId streamChunkId,
+      ChunkReceivedWithStreamCallback callback) {
     updateTimeOfLastRequest();
     outstandingFetches.put(streamChunkId, callback);
   }
@@ -90,7 +92,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
     outstandingRpcs.remove(requestId);
   }
 
-  public void addStreamCallback(String streamId, StreamCallback callback) {
+  public void addStreamCallback(String streamId, StreamCallback<String> callback) {
     timeOfLastRequestNs.set(System.nanoTime());
     streamCallbacks.offer(ImmutablePair.of(streamId, callback));
   }
@@ -105,7 +107,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
    * uncaught exception or pre-mature connection termination.
    */
   private void failOutstandingRequests(Throwable cause) {
-    for (Map.Entry<StreamChunkId, ChunkReceivedCallback> entry : outstandingFetches.entrySet()) {
+    for (Map.Entry<StreamChunkId, ChunkReceivedWithStreamCallback> entry : outstandingFetches.entrySet()) {
       try {
         entry.getValue().onFailure(entry.getKey().chunkIndex, cause);
       } catch (Exception e) {
@@ -161,14 +163,37 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
   public void handle(ResponseMessage message) throws Exception {
     if (message instanceof ChunkFetchSuccess) {
       ChunkFetchSuccess resp = (ChunkFetchSuccess) message;
-      ChunkReceivedCallback listener = outstandingFetches.get(resp.streamChunkId);
+      ChunkReceivedWithStreamCallback listener = outstandingFetches.get(resp.streamChunkId);
       if (listener == null) {
         logger.warn("Ignoring response for block {} from {} since it is not outstanding",
           resp.streamChunkId, getRemoteAddress(channel));
-        resp.body().release();
       } else {
-        outstandingFetches.remove(resp.streamChunkId);
-        listener.onSuccess(resp.streamChunkId.chunkIndex, resp.body());
+        if (resp.isBodyInFrame()) {
+          outstandingFetches.remove(resp.streamChunkId);
+          listener.onSuccess(resp.streamChunkId.chunkIndex, resp.body());
+        } else {
+          if (resp.remainingFrameSize > 0) {
+            StreamInterceptor interceptor = new StreamInterceptor<StreamChunkId>(this,
+              resp.streamChunkId, resp.remainingFrameSize, listener);
+            try {
+              TransportFrameDecoder frameDecoder = (TransportFrameDecoder)
+                      channel.pipeline().get(TransportFrameDecoder.HANDLER_NAME);
+              frameDecoder.setInterceptor(interceptor);
+              streamActive = true;
+            } catch (Exception e) {
+              logger.error("Error installing stream handler.", e);
+              deactivateStream();
+            }
+          } else {
+            try {
+              listener.onComplete(resp.streamChunkId);
+            } catch (Exception e) {
+              logger.warn("Error in stream handler onComplete().", e);
+            }
+          }
+        }
+      }
+      if (resp.isBodyInFrame()) {
         resp.body().release();
       }
     } else if (message instanceof ChunkFetchFailure) {
@@ -212,8 +237,8 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
       if (entry != null) {
         StreamCallback callback = entry.getValue();
         if (resp.byteCount > 0) {
-          StreamInterceptor interceptor = new StreamInterceptor(this, resp.streamId, resp.byteCount,
-            callback);
+          StreamInterceptor interceptor = new StreamInterceptor<String>(this, resp.streamId,
+            resp.byteCount, callback);
           try {
             TransportFrameDecoder frameDecoder = (TransportFrameDecoder)
               channel.pipeline().get(TransportFrameDecoder.HANDLER_NAME);

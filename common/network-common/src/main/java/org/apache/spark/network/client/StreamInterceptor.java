@@ -28,17 +28,17 @@ import org.apache.spark.network.util.TransportFrameDecoder;
  * An interceptor that is registered with the frame decoder to feed stream data to a
  * callback.
  */
-class StreamInterceptor implements TransportFrameDecoder.Interceptor {
+class StreamInterceptor<T> implements TransportFrameDecoder.Interceptor {
 
   private final TransportResponseHandler handler;
-  private final String streamId;
+  private final T streamId;
   private final long byteCount;
-  private final StreamCallback callback;
+  private final StreamCallback<T> callback;
   private long bytesRead;
 
   StreamInterceptor(
       TransportResponseHandler handler,
-      String streamId,
+      T streamId,
       long byteCount,
       StreamCallback callback) {
     this.handler = handler;

@@ -20,10 +20,8 @@ package org.apache.spark.network;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.spark.network.buffer.ManagedBuffer;
 import org.apache.spark.network.buffer.NioManagedBuffer;
-import org.apache.spark.network.client.ChunkReceivedCallback;
-import org.apache.spark.network.client.RpcResponseCallback;
-import org.apache.spark.network.client.TransportClient;
-import org.apache.spark.network.client.TransportClientFactory;
+import org.apache.spark.network.client.*;
+import org.apache.spark.network.protocol.StreamChunkId;
 import org.apache.spark.network.server.RpcHandler;
 import org.apache.spark.network.server.StreamManager;
 import org.apache.spark.network.server.TransportServer;
@@ -235,7 +233,7 @@ public class RequestTimeoutIntegrationSuite {
    * Callback which sets 'success' or 'failure' on completion.
    * Additionally notifies all waiters on this callback when invoked.
    */
-  static class TestCallback implements RpcResponseCallback, ChunkReceivedCallback {
+  static class TestCallback implements RpcResponseCallback, ChunkReceivedWithStreamCallback {
 
     int successLength = -1;
     Throwable failure;
@@ -268,6 +266,21 @@ public class RequestTimeoutIntegrationSuite {
     public void onFailure(int chunkIndex, Throwable e) {
       failure = e;
       latch.countDown();
+    }
+
+    @Override
+    public void onData(StreamChunkId streamId, ByteBuffer buf) throws IOException {
+
+    }
+
+    @Override
+    public void onComplete(StreamChunkId streamId) throws IOException {
+
+    }
+
+    @Override
+    public void onFailure(StreamChunkId streamId, Throwable cause) throws IOException {
+
     }
   }
 }

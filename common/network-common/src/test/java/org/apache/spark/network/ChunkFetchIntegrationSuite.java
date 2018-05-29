@@ -18,6 +18,7 @@
 package org.apache.spark.network;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -32,6 +33,8 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Sets;
 import com.google.common.io.Closeables;
+import org.apache.spark.network.client.*;
+import org.apache.spark.network.protocol.StreamChunkId;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -41,10 +44,6 @@ import static org.junit.Assert.*;
 import org.apache.spark.network.buffer.FileSegmentManagedBuffer;
 import org.apache.spark.network.buffer.ManagedBuffer;
 import org.apache.spark.network.buffer.NioManagedBuffer;
-import org.apache.spark.network.client.ChunkReceivedCallback;
-import org.apache.spark.network.client.RpcResponseCallback;
-import org.apache.spark.network.client.TransportClient;
-import org.apache.spark.network.client.TransportClientFactory;
 import org.apache.spark.network.server.RpcHandler;
 import org.apache.spark.network.server.TransportServer;
 import org.apache.spark.network.server.StreamManager;
@@ -151,7 +150,22 @@ public class ChunkFetchIntegrationSuite {
     res.failedChunks = Collections.synchronizedSet(new HashSet<Integer>());
     res.buffers = Collections.synchronizedList(new LinkedList<ManagedBuffer>());
 
-    ChunkReceivedCallback callback = new ChunkReceivedCallback() {
+    ChunkReceivedWithStreamCallback callback = new ChunkReceivedWithStreamCallback() {
+      @Override
+      public void onData(StreamChunkId streamId, ByteBuffer buf) throws IOException {
+
+      }
+
+      @Override
+      public void onComplete(StreamChunkId streamId) throws IOException {
+
+      }
+
+      @Override
+      public void onFailure(StreamChunkId streamId, Throwable cause) throws IOException {
+
+      }
+
       @Override
       public void onSuccess(int chunkIndex, ManagedBuffer buffer) {
         buffer.retain();

@@ -19,6 +19,7 @@ package org.apache.spark.network;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.function.Supplier;
 
 import io.netty.channel.Channel;
 import io.netty.channel.local.LocalChannel;
@@ -44,8 +45,9 @@ public class TransportResponseHandlerSuite {
     StreamChunkId streamChunkId = new StreamChunkId(1, 0);
 
     TransportResponseHandler handler = new TransportResponseHandler(new LocalChannel());
-    ChunkReceivedWithStreamCallback callback = mock(ChunkReceivedWithStreamCallback.class);
-    handler.addFetchRequest(streamChunkId, callback);
+    ChunkReceivedCallback callback = mock(ChunkReceivedCallback.class);
+    Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory = mock(Supplier.class);
+    handler.addFetchRequest(streamChunkId, callback, streamCallbackFactory);
     assertEquals(1, handler.numOutstandingRequests());
 
     handler.handle(new ChunkFetchSuccess(streamChunkId, new TestManagedBuffer(123)));
@@ -57,8 +59,9 @@ public class TransportResponseHandlerSuite {
   public void handleFailedFetch() throws Exception {
     StreamChunkId streamChunkId = new StreamChunkId(1, 0);
     TransportResponseHandler handler = new TransportResponseHandler(new LocalChannel());
-    ChunkReceivedWithStreamCallback callback = mock(ChunkReceivedWithStreamCallback.class);
-    handler.addFetchRequest(streamChunkId, callback);
+    ChunkReceivedCallback callback = mock(ChunkReceivedCallback.class);
+    Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory = mock(Supplier.class);
+    handler.addFetchRequest(streamChunkId, callback, streamCallbackFactory);
     assertEquals(1, handler.numOutstandingRequests());
 
     handler.handle(new ChunkFetchFailure(streamChunkId, "some error msg"));
@@ -69,10 +72,12 @@ public class TransportResponseHandlerSuite {
   @Test
   public void clearAllOutstandingRequests() throws Exception {
     TransportResponseHandler handler = new TransportResponseHandler(new LocalChannel());
-    ChunkReceivedWithStreamCallback callback = mock(ChunkReceivedWithStreamCallback.class);
-    handler.addFetchRequest(new StreamChunkId(1, 0), callback);
-    handler.addFetchRequest(new StreamChunkId(1, 1), callback);
-    handler.addFetchRequest(new StreamChunkId(1, 2), callback);
+    ChunkReceivedCallback callback = mock(ChunkReceivedCallback.class);
+    Supplier<StreamCallback<StreamChunkId>> streamCallback = mock(Supplier.class);
+
+    handler.addFetchRequest(new StreamChunkId(1, 0), callback, streamCallback);
+    handler.addFetchRequest(new StreamChunkId(1, 1), callback, streamCallback);
+    handler.addFetchRequest(new StreamChunkId(1, 2), callback, streamCallback);
     assertEquals(3, handler.numOutstandingRequests());
 
     handler.handle(new ChunkFetchSuccess(new StreamChunkId(1, 0), new TestManagedBuffer(12)));

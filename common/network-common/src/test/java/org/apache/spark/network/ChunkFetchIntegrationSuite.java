@@ -30,6 +30,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import com.google.common.collect.Sets;
 import com.google.common.io.Closeables;
@@ -40,6 +41,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.mock;
 
 import org.apache.spark.network.buffer.FileSegmentManagedBuffer;
 import org.apache.spark.network.buffer.ManagedBuffer;
@@ -150,22 +152,7 @@ public class ChunkFetchIntegrationSuite {
     res.failedChunks = Collections.synchronizedSet(new HashSet<Integer>());
     res.buffers = Collections.synchronizedList(new LinkedList<ManagedBuffer>());
 
-    ChunkReceivedWithStreamCallback callback = new ChunkReceivedWithStreamCallback() {
-      @Override
-      public void onData(StreamChunkId streamId, ByteBuffer buf) throws IOException {
-
-      }
-
-      @Override
-      public void onComplete(StreamChunkId streamId) throws IOException {
-
-      }
-
-      @Override
-      public void onFailure(StreamChunkId streamId, Throwable cause) throws IOException {
-
-      }
-
+    ChunkReceivedCallback callback = new ChunkReceivedCallback() {
       @Override
       public void onSuccess(int chunkIndex, ManagedBuffer buffer) {
         buffer.retain();
@@ -181,8 +168,9 @@ public class ChunkFetchIntegrationSuite {
       }
     };
 
+    Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory = mock(Supplier.class);
     for (int chunkIndex : chunkIndices) {
-      client.fetchChunk(STREAM_ID, chunkIndex, callback);
+      client.fetchChunk(STREAM_ID, chunkIndex, callback, streamCallbackFactory);
     }
     if (!sem.tryAcquire(chunkIndices.size(), 5, TimeUnit.SECONDS)) {
       fail("Timeout getting response from the server");

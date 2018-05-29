@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
 import java.util.Arrays;
+import java.util.function.Supplier;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
@@ -57,7 +58,8 @@ public class OneForOneBlockFetcher {
   private final OpenBlocks openMessage;
   private final String[] blockIds;
   private final BlockFetchingListener listener;
-  private final ChunkReceivedWithStreamCallback chunkCallback;
+  private final ChunkReceivedCallback chunkCallback;
+  private final Supplier<StreamCallback<StreamChunkId>> fetchChunkDownloadCallbackFactory;
   private final TransportConf transportConf;
   private final TempFileManager tempFileManager;
   private final boolean useStreamRequestMessage;
@@ -91,50 +93,13 @@ public class OneForOneBlockFetcher {
     this.transportConf = transportConf;
     // TODO extend tests to pass a valid  tempFileManager and use:
     // this.tempFileManager = Preconditions.checkNotNull(tempFileManager);
+    fetchChunkDownloadCallbackFactory = () -> new FetchChunkDownloadCallback();
     this.tempFileManager = tempFileManager;
     this.useStreamRequestMessage = useStreamRequestMessage;
   }
 
   /** Callback invoked on receipt of each chunk. We equate a single chunk to a single block. */
-  private class ChunkCallback implements ChunkReceivedWithStreamCallback {
-    private WritableByteChannel channel = null;
-    private File targetFile = null;
-
-    ChunkCallback() {
-      this.targetFile = tempFileManager.createTempFile();
-      try {
-        this.channel = Channels.newChannel(new FileOutputStream(targetFile));
-      } catch (IOException e) {
-        throw new IllegalStateException(e);
-      }
-    }
-
-    @Override
-    public void onData(StreamChunkId streamId, ByteBuffer buf) throws IOException {
-      while (buf.hasRemaining()) {
-        channel.write(buf);
-      }
-    }
-
-    @Override
-    public void onComplete(StreamChunkId streamId) throws IOException {
-      channel.close();
-      ManagedBuffer buffer = new FileSegmentManagedBuffer(transportConf, targetFile, 0,
-              targetFile.length());
-      listener.onBlockFetchSuccess(blockIds[streamId.chunkIndex], buffer);
-      if (!tempFileManager.registerTempFileToClean(targetFile)) {
-        targetFile.delete();
-      }
-    }
-
-    @Override
-    public void onFailure(StreamChunkId streamId, Throwable cause) throws IOException {
-      channel.close();
-      // On receipt of a failure, fail every block from chunkIndex onwards.
-      String[] remainingBlockIds = Arrays.copyOfRange(blockIds, streamId.chunkIndex, blockIds.length);
-      failRemainingBlocks(remainingBlockIds, cause);
-      targetFile.delete();
-    }
+  private class ChunkCallback implements ChunkReceivedCallback {
 
     @Override
     public void onSuccess(int chunkIndex, ManagedBuffer buffer) {
@@ -174,7 +139,8 @@ public class OneForOneBlockFetcher {
               client.stream(OneForOneStreamManager.genStreamChunkId(streamHandle.streamId, i),
                 new DownloadCallback(i));
             } else {
-              client.fetchChunk(streamHandle.streamId, i, chunkCallback);
+              client.fetchChunk(streamHandle.streamId, i,
+                chunkCallback, fetchChunkDownloadCallbackFactory);
             }
           }
         } catch (Exception e) {
@@ -237,6 +203,47 @@ public class OneForOneBlockFetcher {
       channel.close();
       // On receipt of a failure, fail every block from chunkIndex onwards.
       String[] remainingBlockIds = Arrays.copyOfRange(blockIds, chunkIndex, blockIds.length);
+      failRemainingBlocks(remainingBlockIds, cause);
+      targetFile.delete();
+    }
+  }
+
+  private class FetchChunkDownloadCallback implements StreamCallback<StreamChunkId> {
+    private WritableByteChannel channel = null;
+    private File targetFile = null;
+
+    FetchChunkDownloadCallback() {
+      this.targetFile = tempFileManager.createTempFile();
+      try {
+        this.channel = Channels.newChannel(new FileOutputStream(targetFile));
+      } catch (IOException e) {
+        throw new IllegalStateException(e);
+      }
+    }
+
+    @Override
+    public void onData(StreamChunkId streamId, ByteBuffer buf) throws IOException {
+      while (buf.hasRemaining()) {
+        channel.write(buf);
+      }
+    }
+
+    @Override
+    public void onComplete(StreamChunkId streamId) throws IOException {
+      channel.close();
+      ManagedBuffer buffer = new FileSegmentManagedBuffer(transportConf, targetFile, 0,
+              targetFile.length());
+      listener.onBlockFetchSuccess(blockIds[streamId.chunkIndex], buffer);
+      if (!tempFileManager.registerTempFileToClean(targetFile)) {
+        targetFile.delete();
+      }
+    }
+
+    @Override
+    public void onFailure(StreamChunkId streamId, Throwable cause) throws IOException {
+      channel.close();
+      // On receipt of a failure, fail every block from chunkIndex onwards.
+      String[] remainingBlockIds = Arrays.copyOfRange(blockIds, streamId.chunkIndex, blockIds.length);
       failRemainingBlocks(remainingBlockIds, cause);
       targetFile.delete();
     }

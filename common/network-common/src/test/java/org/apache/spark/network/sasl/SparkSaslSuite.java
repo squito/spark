@@ -33,6 +33,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import javax.security.sasl.SaslException;
 
 import com.google.common.collect.ImmutableMap;
@@ -45,6 +46,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import org.apache.spark.network.client.*;
+import org.apache.spark.network.protocol.StreamChunkId;
 import org.junit.Test;
 
 import org.apache.spark.network.TestUtils;
@@ -270,7 +272,7 @@ public class SparkSaslSuite {
 
       CountDownLatch lock = new CountDownLatch(1);
 
-      ChunkReceivedWithStreamCallback callback = mock(ChunkReceivedWithStreamCallback.class);
+      ChunkReceivedCallback callback = mock(ChunkReceivedCallback.class);
       doAnswer(invocation -> {
         response.set((ManagedBuffer) invocation.getArguments()[1]);
         response.get().retain();
@@ -278,7 +280,8 @@ public class SparkSaslSuite {
         return null;
       }).when(callback).onSuccess(anyInt(), any(ManagedBuffer.class));
 
-      ctx.client.fetchChunk(0, 0, callback);
+      Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory = mock(Supplier.class);
+      ctx.client.fetchChunk(0, 0, callback, streamCallbackFactory);
       lock.await(10, TimeUnit.SECONDS);
 
       verify(callback, times(1)).onSuccess(anyInt(), any(ManagedBuffer.class));

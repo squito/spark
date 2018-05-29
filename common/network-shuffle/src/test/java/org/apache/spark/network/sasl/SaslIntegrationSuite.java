@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.apache.spark.network.client.*;
 import org.apache.spark.network.protocol.StreamChunkId;
@@ -229,21 +230,7 @@ public class SaslIntegrationSuite {
         blockServer.getPort());
 
       CountDownLatch chunkReceivedLatch = new CountDownLatch(1);
-      ChunkReceivedWithStreamCallback callback = new ChunkReceivedWithStreamCallback() {
-        @Override
-        public void onData(StreamChunkId streamId, ByteBuffer buf) throws IOException {
-
-        }
-
-        @Override
-        public void onComplete(StreamChunkId streamId) throws IOException {
-
-        }
-
-        @Override
-        public void onFailure(StreamChunkId streamId, Throwable cause) throws IOException {
-
-        }
+      ChunkReceivedCallback callback = new ChunkReceivedCallback() {
 
         @Override
         public void onSuccess(int chunkIndex, ManagedBuffer buffer) {
@@ -257,7 +244,8 @@ public class SaslIntegrationSuite {
       };
 
       exception.set(null);
-      client2.fetchChunk(streamId, 0, callback);
+      Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory = mock(Supplier.class);
+      client2.fetchChunk(streamId, 0, callback, streamCallbackFactory);
       chunkReceivedLatch.await();
       checkSecurityException(exception.get());
     } finally {

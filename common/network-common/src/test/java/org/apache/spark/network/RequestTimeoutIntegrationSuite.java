@@ -29,6 +29,7 @@ import org.apache.spark.network.util.MapConfigProvider;
 import org.apache.spark.network.util.TransportConf;
 import org.junit.*;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.mock;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -36,6 +37,7 @@ import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * Suite which ensures that requests that go without a response for the network timeout period are
@@ -209,12 +211,13 @@ public class RequestTimeoutIntegrationSuite {
 
     // Send one request, which will eventually fail.
     TestCallback callback0 = new TestCallback();
-    client.fetchChunk(0, 0, callback0);
+    Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory = mock(Supplier.class);
+    client.fetchChunk(0, 0, callback0, streamCallbackFactory);
     Uninterruptibles.sleepUninterruptibly(1200, TimeUnit.MILLISECONDS);
 
     // Send a second request before the first has failed.
     TestCallback callback1 = new TestCallback();
-    client.fetchChunk(0, 1, callback1);
+    client.fetchChunk(0, 1, callback1, streamCallbackFactory);
     Uninterruptibles.sleepUninterruptibly(1200, TimeUnit.MILLISECONDS);
 
     // not complete yet, but should complete soon
@@ -233,7 +236,7 @@ public class RequestTimeoutIntegrationSuite {
    * Callback which sets 'success' or 'failure' on completion.
    * Additionally notifies all waiters on this callback when invoked.
    */
-  static class TestCallback implements RpcResponseCallback, ChunkReceivedWithStreamCallback {
+  static class TestCallback implements RpcResponseCallback, ChunkReceivedCallback {
 
     int successLength = -1;
     Throwable failure;
@@ -266,21 +269,6 @@ public class RequestTimeoutIntegrationSuite {
     public void onFailure(int chunkIndex, Throwable e) {
       failure = e;
       latch.countDown();
-    }
-
-    @Override
-    public void onData(StreamChunkId streamId, ByteBuffer buf) throws IOException {
-
-    }
-
-    @Override
-    public void onComplete(StreamChunkId streamId) throws IOException {
-
-    }
-
-    @Override
-    public void onFailure(StreamChunkId streamId, Throwable cause) throws IOException {
-
     }
   }
 }

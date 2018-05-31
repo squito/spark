@@ -18,19 +18,15 @@
 package org.apache.spark.network;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Random;
-import java.util.Set;
+import java.nio.channels.Channels;
+import java.nio.channels.WritableByteChannel;
+import java.util.*;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 
 import com.google.common.collect.Sets;
 import com.google.common.io.Closeables;
@@ -56,6 +52,14 @@ public class ChunkFetchIntegrationSuite {
   static final long STREAM_ID = 1;
   static final int BUFFER_CHUNK_INDEX = 0;
   static final int FILE_CHUNK_INDEX = 1;
+  static final int BUFFER_FETCH_TO_DISK_CHUNK_INDEX = 2;
+  static final int MAX_REMOTE_BLOCK_SIZE_FETCH_TO_MEM = 100000;
+
+  static final TransportConf transportConf =
+    new TransportConf("shuffle",
+      new MapConfigProvider(
+        Collections.singletonMap(
+          "spark.maxRemoteBlockSizeFetchToMem", Integer.toString(MAX_REMOTE_BLOCK_SIZE_FETCH_TO_MEM))));
 
   static TransportServer server;
   static TransportClientFactory clientFactory;
@@ -63,17 +67,68 @@ public class ChunkFetchIntegrationSuite {
   static File testFile;
 
   static ManagedBuffer bufferChunk;
+  static ManagedBuffer bufferToDiskChunk;
+
   static ManagedBuffer fileChunk;
+
+  private class FetchChunkDownloadTestCallback implements StreamCallback<StreamChunkId> {
+    private WritableByteChannel channel = null;
+    private File targetFile = null;
+    private FetchResult fetchResult;
+    private Semaphore semaphore;
+
+    FetchChunkDownloadTestCallback(FetchResult fetchResult, Semaphore semaphore) {
+      this.fetchResult = fetchResult;
+      this.semaphore = semaphore;
+      try {
+        this.targetFile = File.createTempFile("shuffle-test-file-download-", "txt");
+        this.targetFile.deleteOnExit();
+        this.channel = Channels.newChannel(new FileOutputStream(targetFile));
+      } catch (IOException e) {
+        throw new IllegalStateException(e);
+      }
+    }
+
+    @Override
+    public void onData(StreamChunkId streamId, ByteBuffer buf) throws IOException {
+      while (buf.hasRemaining()) {
+        channel.write(buf);
+      }
+    }
+
+    @Override
+    public void onComplete(StreamChunkId streamId) throws IOException {
+      channel.close();
+      ManagedBuffer buffer = new FileSegmentManagedBuffer(transportConf, targetFile, 0,
+        targetFile.length());
+      fetchResult.successChunks.add(streamId.chunkIndex);
+      fetchResult.buffers.add(buffer);
+      semaphore.release();
+    }
+
+    @Override
+    public void onFailure(StreamChunkId streamId, Throwable cause) throws IOException {
+      channel.close();
+      this.fetchResult.failedChunks.add(streamId.chunkIndex);
+      semaphore.release();
+    }
+  }
 
   @BeforeClass
   public static void setUp() throws Exception {
-    int bufSize = 100000;
-    final ByteBuffer buf = ByteBuffer.allocate(bufSize);
-    for (int i = 0; i < bufSize; i ++) {
-      buf.put((byte) i);
+    int bufSize = MAX_REMOTE_BLOCK_SIZE_FETCH_TO_MEM + 100;
+    final ByteBuffer hugeBuf = ByteBuffer.allocate(bufSize);
+    for (int i = 0; i < MAX_REMOTE_BLOCK_SIZE_FETCH_TO_MEM; i ++) {
+      hugeBuf.put((byte) i);
     }
-    buf.flip();
-    bufferChunk = new NioManagedBuffer(buf);
+    ByteBuffer smallBuff = hugeBuf.duplicate();
+    smallBuff.flip();
+    bufferChunk = new NioManagedBuffer(smallBuff);
+    for (int i = MAX_REMOTE_BLOCK_SIZE_FETCH_TO_MEM; i < bufSize; i ++) {
+      hugeBuf.put((byte) i);
+    }
+    hugeBuf.flip();
+    bufferToDiskChunk = new NioManagedBuffer(hugeBuf);
 
     testFile = File.createTempFile("shuffle-test-file", "txt");
     testFile.deleteOnExit();
@@ -88,19 +143,21 @@ public class ChunkFetchIntegrationSuite {
       Closeables.close(fp, shouldSuppressIOException);
     }
 
-    final TransportConf conf = new TransportConf("shuffle", MapConfigProvider.EMPTY);
-    fileChunk = new FileSegmentManagedBuffer(conf, testFile, 10, testFile.length() - 25);
+    fileChunk = new FileSegmentManagedBuffer(transportConf, testFile, 10, testFile.length() - 25);
 
     streamManager = new StreamManager() {
       @Override
       public ManagedBuffer getChunk(long streamId, int chunkIndex) {
         assertEquals(STREAM_ID, streamId);
-        if (chunkIndex == BUFFER_CHUNK_INDEX) {
-          return new NioManagedBuffer(buf);
-        } else if (chunkIndex == FILE_CHUNK_INDEX) {
-          return new FileSegmentManagedBuffer(conf, testFile, 10, testFile.length() - 25);
-        } else {
-          throw new IllegalArgumentException("Invalid chunk index: " + chunkIndex);
+        switch (chunkIndex) {
+          case BUFFER_CHUNK_INDEX:
+            return new NioManagedBuffer(smallBuff);
+          case FILE_CHUNK_INDEX:
+            return new FileSegmentManagedBuffer(transportConf, testFile, 10, testFile.length() - 25);
+          case BUFFER_FETCH_TO_DISK_CHUNK_INDEX:
+            return new NioManagedBuffer(hugeBuf);
+          default:
+            throw new IllegalArgumentException("Invalid chunk index: " + chunkIndex);
         }
       }
     };
@@ -118,7 +175,7 @@ public class ChunkFetchIntegrationSuite {
         return streamManager;
       }
     };
-    TransportContext context = new TransportContext(conf, handler);
+    TransportContext context = new TransportContext(transportConf, handler);
     server = context.createServer();
     clientFactory = context.createClientFactory();
   }
@@ -126,6 +183,7 @@ public class ChunkFetchIntegrationSuite {
   @AfterClass
   public static void tearDown() {
     bufferChunk.release();
+    bufferToDiskChunk.release();
     server.close();
     clientFactory.close();
     testFile.delete();
@@ -168,11 +226,11 @@ public class ChunkFetchIntegrationSuite {
       }
     };
 
-    Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory = mock(Supplier.class);
     for (int chunkIndex : chunkIndices) {
-      client.fetchChunk(STREAM_ID, chunkIndex, callback, streamCallbackFactory);
+      client.fetchChunk(STREAM_ID, chunkIndex, callback,
+        () -> new FetchChunkDownloadTestCallback(res, sem));
     }
-    if (!sem.tryAcquire(chunkIndices.size(), 5, TimeUnit.SECONDS)) {
+    if (!sem.tryAcquire(chunkIndices.size(), 5, TimeUnit.MINUTES)) {
       fail("Timeout getting response from the server");
     }
     client.close();
@@ -184,6 +242,7 @@ public class ChunkFetchIntegrationSuite {
     FetchResult res = fetchChunks(Arrays.asList(BUFFER_CHUNK_INDEX));
     assertEquals(Sets.newHashSet(BUFFER_CHUNK_INDEX), res.successChunks);
     assertTrue(res.failedChunks.isEmpty());
+    assertNumFileSegments(0, res.buffers);
     assertBufferListsEqual(Arrays.asList(bufferChunk), res.buffers);
     res.releaseBuffers();
   }
@@ -193,6 +252,7 @@ public class ChunkFetchIntegrationSuite {
     FetchResult res = fetchChunks(Arrays.asList(FILE_CHUNK_INDEX));
     assertEquals(Sets.newHashSet(FILE_CHUNK_INDEX), res.successChunks);
     assertTrue(res.failedChunks.isEmpty());
+    assertNumFileSegments(0, res.buffers);
     assertBufferListsEqual(Arrays.asList(fileChunk), res.buffers);
     res.releaseBuffers();
   }
@@ -210,7 +270,22 @@ public class ChunkFetchIntegrationSuite {
     FetchResult res = fetchChunks(Arrays.asList(BUFFER_CHUNK_INDEX, FILE_CHUNK_INDEX));
     assertEquals(Sets.newHashSet(BUFFER_CHUNK_INDEX, FILE_CHUNK_INDEX), res.successChunks);
     assertTrue(res.failedChunks.isEmpty());
+    assertNumFileSegments(0, res.buffers);
     assertBufferListsEqual(Arrays.asList(bufferChunk, fileChunk), res.buffers);
+    res.releaseBuffers();
+  }
+
+
+  @Test
+  public void fetchSomeChunksToDisk() throws Exception {
+    FetchResult res = fetchChunks(
+      Arrays.asList(BUFFER_CHUNK_INDEX, BUFFER_FETCH_TO_DISK_CHUNK_INDEX, FILE_CHUNK_INDEX));
+    assertEquals(
+      Sets.newHashSet(BUFFER_CHUNK_INDEX, BUFFER_FETCH_TO_DISK_CHUNK_INDEX, FILE_CHUNK_INDEX),
+      res.successChunks);
+    assertTrue(res.failedChunks.isEmpty());
+    assertNumFileSegments(1, res.buffers);
+    assertBufferListsEqual(Arrays.asList(bufferChunk, bufferToDiskChunk, fileChunk), res.buffers);
     res.releaseBuffers();
   }
 
@@ -221,6 +296,11 @@ public class ChunkFetchIntegrationSuite {
     assertEquals(Sets.newHashSet(12345), res.failedChunks);
     assertBufferListsEqual(Arrays.asList(bufferChunk), res.buffers);
     res.releaseBuffers();
+  }
+
+  private void assertNumFileSegments(int expected, List<ManagedBuffer> buffers) {
+    assertEquals(expected,
+      buffers.stream().filter(b -> b instanceof FileSegmentManagedBuffer).count());
   }
 
   private static void assertBufferListsEqual(List<ManagedBuffer> list0, List<ManagedBuffer> list1)

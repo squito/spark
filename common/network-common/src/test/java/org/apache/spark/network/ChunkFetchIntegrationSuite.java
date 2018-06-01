@@ -72,8 +72,8 @@ public class ChunkFetchIntegrationSuite {
   static ManagedBuffer fileChunk;
 
   private class FetchChunkDownloadTestCallback implements StreamCallback<StreamChunkId> {
-    private WritableByteChannel channel = null;
-    private File targetFile = null;
+    private WritableByteChannel channel;
+    private File targetFile;
     private FetchResult fetchResult;
     private Semaphore semaphore;
 
@@ -230,7 +230,7 @@ public class ChunkFetchIntegrationSuite {
       client.fetchChunk(STREAM_ID, chunkIndex, callback,
         () -> new FetchChunkDownloadTestCallback(res, sem));
     }
-    if (!sem.tryAcquire(chunkIndices.size(), 5, TimeUnit.MINUTES)) {
+    if (!sem.tryAcquire(chunkIndices.size(), 5, TimeUnit.SECONDS)) {
       fail("Timeout getting response from the server");
     }
     client.close();

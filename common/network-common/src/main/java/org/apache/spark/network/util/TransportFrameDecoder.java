@@ -59,11 +59,17 @@ public class TransportFrameDecoder extends ChannelInboundHandlerAdapter {
   private long nextFrameSize = UNKNOWN_FRAME_SIZE;
   private volatile Interceptor interceptor;
   private Message.Type msgType = null;
+  private final boolean isSasl;
 
   private final long maxRemoteBlockSizeFetchToMem;
 
   public TransportFrameDecoder(long maxRemoteBlockSizeFetchToMem) {
+    this(maxRemoteBlockSizeFetchToMem, false);
+  }
+
+  public TransportFrameDecoder(long maxRemoteBlockSizeFetchToMem, boolean isSasl) {
     this.maxRemoteBlockSizeFetchToMem = maxRemoteBlockSizeFetchToMem;
+    this.isSasl = isSasl;
   }
 
   @Override
@@ -87,26 +93,37 @@ public class TransportFrameDecoder extends ChannelInboundHandlerAdapter {
         }
         totalSize -= read;
       } else {
-        // Interceptor is not active, so try to decode one frame.
-        decodeNextMsgType();
-        if (msgType == null) {
-          break;
-        }
-        long remainingFrameSize = 0;
-        if (msgType == Message.Type.ChunkFetchSuccess &&
-            nextFrameSize - ChunkFetchSuccess.ENCODED_LENGTH > maxRemoteBlockSizeFetchToMem) {
+        if (isSasl) {
+          if (!isFrameSizeAvailable()) {
+            break;
+          }
+          ByteBuf frame = decodeNext();
+          if (frame == null) {
+            break;
+          }
+          ctx.fireChannelRead(frame);
+        } else {
+          // Interceptor is not active, so try to decode one frame.
+          decodeNextMsgType();
+          if (msgType == null) {
+            break;
+          }
+          long remainingFrameSize = 0;
+          if (msgType == Message.Type.ChunkFetchSuccess &&
+              nextFrameSize - ChunkFetchSuccess.ENCODED_LENGTH > maxRemoteBlockSizeFetchToMem) {
             remainingFrameSize = nextFrameSize - ChunkFetchSuccess.ENCODED_LENGTH;
             nextFrameSize = ChunkFetchSuccess.ENCODED_LENGTH;
-        }
+          }
 
-        ByteBuf frame = decodeNext();
-        if (frame == null) {
-          break;
+          ByteBuf frame = decodeNext();
+          if (frame == null) {
+            break;
+          }
+          ParsedFrame parsedFrame =
+              new ParsedFrame(msgType, frame, remainingFrameSize);
+          msgType = null;
+          ctx.fireChannelRead(parsedFrame);
         }
-        ParsedFrame parsedFrame =
-          new ParsedFrame(msgType, frame, remainingFrameSize);
-        msgType = null;
-        ctx.fireChannelRead(parsedFrame);
       }
     }
   }
@@ -146,18 +163,7 @@ public class TransportFrameDecoder extends ChannelInboundHandlerAdapter {
   }
 
   private void decodeNextMsgType() {
-    if (msgType != null) {
-      return;
-    }
-    long frameSize = decodeFrameSize();
-    if (frameSize == UNKNOWN_FRAME_SIZE) {
-      return;
-    }
-
-    Preconditions.checkArgument(frameSize < MAX_FRAME_SIZE, "Too large frame: %s", frameSize);
-    Preconditions.checkArgument(frameSize > 0, "Frame length should be positive: %s", frameSize);
-
-    if(totalSize < Message.Type.LENGTH) {
+    if (msgType != null || !isFrameSizeAvailable() || totalSize < Message.Type.LENGTH) {
       return;
     }
 
@@ -168,6 +174,17 @@ public class TransportFrameDecoder extends ChannelInboundHandlerAdapter {
     if (!first.isReadable()) {
       buffers.removeFirst().release();
     }
+  }
+
+  private boolean isFrameSizeAvailable() {
+    long frameSize = decodeFrameSize();
+    if (frameSize == UNKNOWN_FRAME_SIZE) {
+      return false;
+    }
+
+    Preconditions.checkArgument(frameSize < MAX_FRAME_SIZE, "Too large frame: %s", frameSize);
+    Preconditions.checkArgument(frameSize > 0, "Frame length should be positive: %s", frameSize);
+    return true;
   }
 
   private ByteBuf decodeNext() {

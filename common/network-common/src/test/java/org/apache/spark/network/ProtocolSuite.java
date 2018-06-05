@@ -55,7 +55,8 @@ public class ProtocolSuite {
     serverChannel.writeOutbound(msg);
 
     EmbeddedChannel clientChannel = new EmbeddedChannel(
-            NettyUtils.createFrameDecoder(maxRemoteBlockSizeFetchToMem), MessageDecoder.INSTANCE);
+            NettyUtils.createFrameDecoder(maxRemoteBlockSizeFetchToMem, false),
+            MessageDecoder.INSTANCE);
 
     while (!serverChannel.outboundMessages().isEmpty()) {
       clientChannel.writeOneInbound(serverChannel.readOutbound());
@@ -76,7 +77,8 @@ public class ProtocolSuite {
     clientChannel.writeOutbound(msg);
 
     EmbeddedChannel serverChannel = new EmbeddedChannel(
-        NettyUtils.createFrameDecoder(Integer.MAX_VALUE), MessageDecoder.INSTANCE);
+        NettyUtils.createFrameDecoder(Integer.MAX_VALUE, false),
+        MessageDecoder.INSTANCE);
 
     while (!clientChannel.outboundMessages().isEmpty()) {
       serverChannel.writeOneInbound(clientChannel.readOutbound());

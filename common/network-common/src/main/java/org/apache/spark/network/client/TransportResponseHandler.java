@@ -87,6 +87,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
 
   public void removeFetchRequest(StreamChunkId streamChunkId) {
     outstandingFetches.remove(streamChunkId);
+    outstandingStreamFetches.remove(streamChunkId);
   }
 
   public void addRpcRequest(long requestId, RpcResponseCallback callback) {
@@ -139,6 +140,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
     outstandingFetches.clear();
     outstandingRpcs.clear();
     streamCallbacks.clear();
+    outstandingStreamFetches.clear();
   }
 
   @Override
@@ -180,6 +182,8 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
         } else {
           StreamCallback<StreamChunkId> streamCallback =
                   outstandingStreamFetches.get(resp.streamChunkId).get();
+          outstandingFetches.remove(resp.streamChunkId);
+          outstandingStreamFetches.remove(resp.streamChunkId);
           if (resp.remainingFrameSize > 0) {
             StreamInterceptor interceptor = new StreamInterceptor<StreamChunkId>(this,
               resp.streamChunkId, resp.remainingFrameSize, streamCallback);

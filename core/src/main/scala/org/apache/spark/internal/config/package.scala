@@ -425,11 +425,17 @@ package object config {
       .doc("Remote block will be fetched to disk when size of the block is above this threshold " +
         "in bytes. This is to avoid a giant request takes too much memory. We can enable this " +
         "config by setting a specific value(e.g. 200m). Note this configuration will affect " +
-        "both shuffle fetch and block manager remote block fetch. For users who enabled " +
-        "external shuffle service, this feature can only be worked when external shuffle" +
-        "service is newer than Spark 2.2.")
+        "both shuffle fetch and block manager remote block fetch.")
       .bytesConf(ByteUnit.BYTE)
       .createWithDefault(Long.MaxValue)
+
+  private[spark] val STREAM_REQUEST_MESSAGE_ENABLED =
+    ConfigBuilder("spark.streamRequestMessageEnabled")
+      .doc("Remote block will be requested to be fetched to disk using stream request message. " +
+        "For users who enabled external shuffle service, this feature can only be worked when " +
+        "external shuffle service is newer than Spark 2.2.")
+      .booleanConf
+      .createWithDefault(false)
 
   private[spark] val TASK_METRICS_TRACK_UPDATED_BLOCK_STATUSES =
     ConfigBuilder("spark.taskMetrics.trackUpdatedBlockStatuses")

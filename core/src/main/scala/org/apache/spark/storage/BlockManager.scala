@@ -212,6 +212,7 @@ private[spark] class BlockManager(
   private[storage] val remoteBlockTempFileManager =
     new BlockManager.RemoteBlockTempFileManager(this)
   private val maxRemoteBlockToMem = conf.get(config.MAX_REMOTE_BLOCK_SIZE_FETCH_TO_MEM)
+  private val streamRequestMessageEnabled = conf.get(config.STREAM_REQUEST_MESSAGE_ENABLED)
 
   /**
    * Initializes the BlockManager with the given appId. This is not performed in the constructor as
@@ -671,16 +672,7 @@ private[spark] class BlockManager(
       b.status.diskSize.max(b.status.memSize)
     }.getOrElse(0L)
     val blockLocations = locationsAndStatus.map(_.locations).getOrElse(Seq.empty)
-
-    // If the block size is above the threshold, we should pass our FileManger to
-    // BlockTransferService, which will leverage it to spill the block; if not, then passed-in
-    // null value means the block will be persisted in memory.
-    val tempFileManager = if (blockSize > maxRemoteBlockToMem) {
-      remoteBlockTempFileManager
-    } else {
-      null
-    }
-
+    val useStreamRequestMessage = streamRequestMessageEnabled && blockSize > maxRemoteBlockToMem
     val locations = sortLocations(blockLocations)
     val maxFetchFailures = locations.size
     var locationIterator = locations.iterator
@@ -689,7 +681,12 @@ private[spark] class BlockManager(
       logDebug(s"Getting remote block $blockId from $loc")
       val data = try {
         blockTransferService.fetchBlockSync(
-          loc.host, loc.port, loc.executorId, blockId.toString, tempFileManager).nioByteBuffer()
+          loc.host,
+          loc.port,
+          loc.executorId,
+          blockId.toString,
+          remoteBlockTempFileManager,
+          useStreamRequestMessage).nioByteBuffer()
       } catch {
         case NonFatal(e) =>
           runningFailureCount += 1

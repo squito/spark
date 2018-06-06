@@ -39,6 +39,9 @@ public interface Message extends Encodable {
     StreamRequest(6), StreamResponse(7), StreamFailure(8),
     OneWayMessage(9), User(-1);
 
+    /** Encoded length in bytes. */
+    public static final int LENGTH = 1;
+
     private final byte id;
 
     Type(int id) {
@@ -48,7 +51,7 @@ public interface Message extends Encodable {
 
     public byte id() { return id; }
 
-    @Override public int encodedLength() { return 1; }
+    @Override public int encodedLength() { return LENGTH; }
 
     @Override public void encode(ByteBuf buf) { buf.writeByte(id); }
 

@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -132,14 +133,15 @@ public class TransportClient implements Closeable {
   public void fetchChunk(
       long streamId,
       int chunkIndex,
-      ChunkReceivedCallback callback) {
+      ChunkReceivedCallback callback,
+      Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory) {
     long startTime = System.currentTimeMillis();
     if (logger.isDebugEnabled()) {
       logger.debug("Sending fetch chunk request {} to {}", chunkIndex, getRemoteAddress(channel));
     }
 
     StreamChunkId streamChunkId = new StreamChunkId(streamId, chunkIndex);
-    handler.addFetchRequest(streamChunkId, callback);
+    handler.addFetchRequest(streamChunkId, callback, streamCallbackFactory);
 
     channel.writeAndFlush(new ChunkFetchRequest(streamChunkId)).addListener(future -> {
       if (future.isSuccess()) {
@@ -169,7 +171,7 @@ public class TransportClient implements Closeable {
    * @param streamId The stream to fetch.
    * @param callback Object to call with the stream data.
    */
-  public void stream(String streamId, StreamCallback callback) {
+  public void stream(String streamId, StreamCallback<String> callback) {
     long startTime = System.currentTimeMillis();
     if (logger.isDebugEnabled()) {
       logger.debug("Sending stream request for {} to {}", streamId, getRemoteAddress(channel));

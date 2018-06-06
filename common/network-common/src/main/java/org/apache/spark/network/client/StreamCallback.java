@@ -17,6 +17,8 @@
 
 package org.apache.spark.network.client;
 
+import io.netty.buffer.ByteBuf;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
@@ -28,13 +30,13 @@ import java.nio.ByteBuffer;
  * The network library guarantees that a single thread will call these methods at a time, but
  * different call may be made by different threads.
  */
-public interface StreamCallback {
+public interface StreamCallback<T> {
   /** Called upon receipt of stream data. */
-  void onData(String streamId, ByteBuffer buf) throws IOException;
+  void onData(T streamId, ByteBuffer buf) throws IOException;
 
   /** Called when all data from the stream has been received. */
-  void onComplete(String streamId) throws IOException;
+  void onComplete(T streamId) throws IOException;
 
   /** Called if there's an error reading data from the stream. */
-  void onFailure(String streamId, Throwable cause) throws IOException;
+  void onFailure(T streamId, Throwable cause) throws IOException;
 }

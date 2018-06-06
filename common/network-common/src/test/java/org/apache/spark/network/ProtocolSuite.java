@@ -28,6 +28,8 @@ import io.netty.handler.codec.MessageToMessageEncoder;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 
 import org.apache.spark.network.protocol.ChunkFetchFailure;
 import org.apache.spark.network.protocol.ChunkFetchRequest;
@@ -47,20 +49,26 @@ import org.apache.spark.network.util.ByteArrayWritableChannel;
 import org.apache.spark.network.util.NettyUtils;
 
 public class ProtocolSuite {
-  private void testServerToClient(Message msg) {
+  private Message decodedClientMessageFromChannel(Message msg, long maxRemoteBlockSizeFetchToMem) {
     EmbeddedChannel serverChannel = new EmbeddedChannel(new FileRegionEncoder(),
-      MessageEncoder.INSTANCE);
+            MessageEncoder.INSTANCE);
     serverChannel.writeOutbound(msg);
 
     EmbeddedChannel clientChannel = new EmbeddedChannel(
-        NettyUtils.createFrameDecoder(), MessageDecoder.INSTANCE);
+            NettyUtils.createFrameDecoder(maxRemoteBlockSizeFetchToMem, false),
+            MessageDecoder.INSTANCE);
 
     while (!serverChannel.outboundMessages().isEmpty()) {
       clientChannel.writeOneInbound(serverChannel.readOutbound());
     }
 
     assertEquals(1, clientChannel.inboundMessages().size());
-    assertEquals(msg, clientChannel.readInbound());
+    return clientChannel.readInbound();
+  }
+
+  private void testServerToClient(Message msg) {
+    Message clientMessage = decodedClientMessageFromChannel(msg, Integer.MAX_VALUE);
+    assertEquals(msg, clientMessage);
   }
 
   private void testClientToServer(Message msg) {
@@ -69,7 +77,8 @@ public class ProtocolSuite {
     clientChannel.writeOutbound(msg);
 
     EmbeddedChannel serverChannel = new EmbeddedChannel(
-        NettyUtils.createFrameDecoder(), MessageDecoder.INSTANCE);
+        NettyUtils.createFrameDecoder(Integer.MAX_VALUE, false),
+        MessageDecoder.INSTANCE);
 
     while (!clientChannel.outboundMessages().isEmpty()) {
       serverChannel.writeOneInbound(clientChannel.readOutbound());
@@ -77,6 +86,31 @@ public class ProtocolSuite {
 
     assertEquals(1, serverChannel.inboundMessages().size());
     assertEquals(msg, serverChannel.readInbound());
+  }
+
+  private ChunkFetchSuccess chunkFetchSuccessWith100Bytes() {
+    return new ChunkFetchSuccess(new StreamChunkId(1, 2), new TestManagedBuffer(100));
+  }
+
+  private void testChunkFetchSuccess() {
+    // test without fetch to disk, maxRemoteBlockSizeFetchToMem is Integer.MAX_VALUE
+    testServerToClient(new ChunkFetchSuccess(new StreamChunkId(1, 2), new TestManagedBuffer(10)));
+    testServerToClient(new ChunkFetchSuccess(new StreamChunkId(1, 2), new TestManagedBuffer(0)));
+
+    // test with fetch to disk
+    // under (and at) the fetch to mem limit
+    Message chunkFetchSuccessUnderFetchToMemBlockSize =
+      decodedClientMessageFromChannel(chunkFetchSuccessWith100Bytes(), 101);
+    assertEquals(chunkFetchSuccessWith100Bytes(), chunkFetchSuccessUnderFetchToMemBlockSize);
+    chunkFetchSuccessUnderFetchToMemBlockSize =
+      decodedClientMessageFromChannel(chunkFetchSuccessWith100Bytes(), 100);
+    assertEquals(chunkFetchSuccessWith100Bytes(), chunkFetchSuccessUnderFetchToMemBlockSize);
+
+    // above the fetch to mem limit
+    Message chunkFetchSuccessAboveFetchToMemBlockSize =
+      decodedClientMessageFromChannel(chunkFetchSuccessWith100Bytes(), 99);
+    assertNull("message body must be not included", chunkFetchSuccessAboveFetchToMemBlockSize.body());
+    assertFalse("message body must be not included", chunkFetchSuccessAboveFetchToMemBlockSize.isBodyInFrame());
   }
 
   @Test
@@ -88,10 +122,10 @@ public class ProtocolSuite {
     testClientToServer(new OneWayMessage(new TestManagedBuffer(10)));
   }
 
+
   @Test
   public void responses() {
-    testServerToClient(new ChunkFetchSuccess(new StreamChunkId(1, 2), new TestManagedBuffer(10)));
-    testServerToClient(new ChunkFetchSuccess(new StreamChunkId(1, 2), new TestManagedBuffer(0)));
+    testChunkFetchSuccess();
     testServerToClient(new ChunkFetchFailure(new StreamChunkId(1, 2), "this is an error"));
     testServerToClient(new ChunkFetchFailure(new StreamChunkId(1, 2), ""));
     testServerToClient(new RpcResponse(12345, new TestManagedBuffer(0)));

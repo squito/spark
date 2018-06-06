@@ -69,6 +69,7 @@ final class ShuffleBlockFetcherIterator(
     maxBytesInFlight: Long,
     maxReqsInFlight: Int,
     maxBlocksInFlightPerAddress: Int,
+    streamRequestMessageEnabled: Boolean,
     maxReqSizeShuffleToMem: Long,
     detectCorrupt: Boolean)
   extends Iterator[(BlockId, InputStream)] with TempFileManager with Logging {
@@ -248,13 +249,14 @@ final class ShuffleBlockFetcherIterator(
     // Fetch remote shuffle blocks to disk when the request is too large. Since the shuffle data is
     // already encrypted and compressed over the wire(w.r.t. the related configs), we can just fetch
     // the data and write it to file directly.
-    if (req.size > maxReqSizeShuffleToMem) {
-      shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
-        blockFetchingListener, this)
-    } else {
-      shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
-        blockFetchingListener, null)
-    }
+    shuffleClient.fetchBlocks(
+      address.host,
+      address.port,
+      address.executorId,
+      blockIds.toArray,
+      blockFetchingListener,
+      this,
+      req.size > maxReqSizeShuffleToMem && streamRequestMessageEnabled)
   }
 
   private[this] def splitLocalRemoteBlocks(): ArrayBuffer[FetchRequest] = {

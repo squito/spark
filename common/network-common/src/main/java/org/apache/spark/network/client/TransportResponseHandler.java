@@ -23,6 +23,7 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import io.netty.channel.Channel;
@@ -55,10 +56,12 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
   private final Channel channel;
 
   private final Map<StreamChunkId, ChunkReceivedCallback> outstandingFetches;
+  private final Map<StreamChunkId, Supplier<StreamCallback<StreamChunkId>>>
+    outstandingStreamFetches;
 
   private final Map<Long, RpcResponseCallback> outstandingRpcs;
 
-  private final Queue<Pair<String, StreamCallback>> streamCallbacks;
+  private final Queue<Pair<String, StreamCallback<String>>> streamCallbacks;
   private volatile boolean streamActive;
 
   /** Records the time (in system nanoseconds) that the last fetch or RPC request was sent. */
@@ -67,18 +70,24 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
   public TransportResponseHandler(Channel channel) {
     this.channel = channel;
     this.outstandingFetches = new ConcurrentHashMap<>();
+    this.outstandingStreamFetches = new ConcurrentHashMap<>();
     this.outstandingRpcs = new ConcurrentHashMap<>();
     this.streamCallbacks = new ConcurrentLinkedQueue<>();
     this.timeOfLastRequestNs = new AtomicLong(0);
   }
 
-  public void addFetchRequest(StreamChunkId streamChunkId, ChunkReceivedCallback callback) {
+  public void addFetchRequest(
+      StreamChunkId streamChunkId,
+      ChunkReceivedCallback callback,
+      Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory) {
     updateTimeOfLastRequest();
     outstandingFetches.put(streamChunkId, callback);
+    outstandingStreamFetches.put(streamChunkId, streamCallbackFactory);
   }
 
   public void removeFetchRequest(StreamChunkId streamChunkId) {
     outstandingFetches.remove(streamChunkId);
+    outstandingStreamFetches.remove(streamChunkId);
   }
 
   public void addRpcRequest(long requestId, RpcResponseCallback callback) {
@@ -90,7 +99,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
     outstandingRpcs.remove(requestId);
   }
 
-  public void addStreamCallback(String streamId, StreamCallback callback) {
+  public void addStreamCallback(String streamId, StreamCallback<String> callback) {
     timeOfLastRequestNs.set(System.nanoTime());
     streamCallbacks.offer(ImmutablePair.of(streamId, callback));
   }
@@ -119,7 +128,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
         logger.warn("RpcResponseCallback.onFailure throws exception", e);
       }
     }
-    for (Pair<String, StreamCallback> entry : streamCallbacks) {
+    for (Pair<String, StreamCallback<String>> entry : streamCallbacks) {
       try {
         entry.getValue().onFailure(entry.getKey(), cause);
       } catch (Exception e) {
@@ -131,6 +140,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
     outstandingFetches.clear();
     outstandingRpcs.clear();
     streamCallbacks.clear();
+    outstandingStreamFetches.clear();
   }
 
   @Override
@@ -165,10 +175,37 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
       if (listener == null) {
         logger.warn("Ignoring response for block {} from {} since it is not outstanding",
           resp.streamChunkId, getRemoteAddress(channel));
-        resp.body().release();
       } else {
-        outstandingFetches.remove(resp.streamChunkId);
-        listener.onSuccess(resp.streamChunkId.chunkIndex, resp.body());
+        if (resp.isBodyInFrame()) {
+          outstandingFetches.remove(resp.streamChunkId);
+          listener.onSuccess(resp.streamChunkId.chunkIndex, resp.body());
+        } else {
+          StreamCallback<StreamChunkId> streamCallback =
+                  outstandingStreamFetches.get(resp.streamChunkId).get();
+          outstandingFetches.remove(resp.streamChunkId);
+          outstandingStreamFetches.remove(resp.streamChunkId);
+          if (resp.remainingFrameSize > 0) {
+            StreamInterceptor interceptor = new StreamInterceptor<StreamChunkId>(this,
+              resp.streamChunkId, resp.remainingFrameSize, streamCallback);
+            try {
+              TransportFrameDecoder frameDecoder = (TransportFrameDecoder)
+                      channel.pipeline().get(TransportFrameDecoder.HANDLER_NAME);
+              frameDecoder.setInterceptor(interceptor);
+              streamActive = true;
+            } catch (Exception e) {
+              logger.error("Error installing stream handler.", e);
+              deactivateStream();
+            }
+          } else {
+            try {
+              streamCallback.onComplete(resp.streamChunkId);
+            } catch (Exception e) {
+              logger.warn("Error in stream handler onComplete().", e);
+            }
+          }
+        }
+      }
+      if (resp.isBodyInFrame()) {
         resp.body().release();
       }
     } else if (message instanceof ChunkFetchFailure) {
@@ -208,12 +245,12 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
       }
     } else if (message instanceof StreamResponse) {
       StreamResponse resp = (StreamResponse) message;
-      Pair<String, StreamCallback> entry = streamCallbacks.poll();
+      Pair<String, StreamCallback<String>> entry = streamCallbacks.poll();
       if (entry != null) {
         StreamCallback callback = entry.getValue();
         if (resp.byteCount > 0) {
-          StreamInterceptor interceptor = new StreamInterceptor(this, resp.streamId, resp.byteCount,
-            callback);
+          StreamInterceptor interceptor = new StreamInterceptor<String>(this, resp.streamId,
+            resp.byteCount, callback);
           try {
             TransportFrameDecoder frameDecoder = (TransportFrameDecoder)
               channel.pipeline().get(TransportFrameDecoder.HANDLER_NAME);
@@ -235,7 +272,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
       }
     } else if (message instanceof StreamFailure) {
       StreamFailure resp = (StreamFailure) message;
-      Pair<String, StreamCallback> entry = streamCallbacks.poll();
+      Pair<String, StreamCallback<String>> entry = streamCallbacks.poll();
       if (entry != null) {
         StreamCallback callback = entry.getValue();
         try {

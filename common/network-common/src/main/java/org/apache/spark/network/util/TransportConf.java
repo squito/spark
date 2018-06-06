@@ -281,4 +281,8 @@ public class TransportConf {
   public long maxChunksBeingTransferred() {
     return conf.getLong("spark.shuffle.maxChunksBeingTransferred", Long.MAX_VALUE);
   }
+
+  public long maxRemoteBlockSizeFetchToMem() {
+    return conf.getLong("spark.maxRemoteBlockSizeFetchToMem", Long.MAX_VALUE);
+  }
 }

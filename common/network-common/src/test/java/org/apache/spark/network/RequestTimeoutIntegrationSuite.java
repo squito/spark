@@ -20,10 +20,8 @@ package org.apache.spark.network;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.spark.network.buffer.ManagedBuffer;
 import org.apache.spark.network.buffer.NioManagedBuffer;
-import org.apache.spark.network.client.ChunkReceivedCallback;
-import org.apache.spark.network.client.RpcResponseCallback;
-import org.apache.spark.network.client.TransportClient;
-import org.apache.spark.network.client.TransportClientFactory;
+import org.apache.spark.network.client.*;
+import org.apache.spark.network.protocol.StreamChunkId;
 import org.apache.spark.network.server.RpcHandler;
 import org.apache.spark.network.server.StreamManager;
 import org.apache.spark.network.server.TransportServer;
@@ -31,6 +29,7 @@ import org.apache.spark.network.util.MapConfigProvider;
 import org.apache.spark.network.util.TransportConf;
 import org.junit.*;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.mock;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -38,6 +37,7 @@ import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * Suite which ensures that requests that go without a response for the network timeout period are
@@ -211,12 +211,13 @@ public class RequestTimeoutIntegrationSuite {
 
     // Send one request, which will eventually fail.
     TestCallback callback0 = new TestCallback();
-    client.fetchChunk(0, 0, callback0);
+    Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory = mock(Supplier.class);
+    client.fetchChunk(0, 0, callback0, streamCallbackFactory);
     Uninterruptibles.sleepUninterruptibly(1200, TimeUnit.MILLISECONDS);
 
     // Send a second request before the first has failed.
     TestCallback callback1 = new TestCallback();
-    client.fetchChunk(0, 1, callback1);
+    client.fetchChunk(0, 1, callback1, streamCallbackFactory);
     Uninterruptibles.sleepUninterruptibly(1200, TimeUnit.MILLISECONDS);
 
     // not complete yet, but should complete soon

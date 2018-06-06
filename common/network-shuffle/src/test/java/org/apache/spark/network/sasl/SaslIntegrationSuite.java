@@ -23,7 +23,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
+import org.apache.spark.network.client.*;
+import org.apache.spark.network.protocol.StreamChunkId;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -35,10 +38,6 @@ import static org.mockito.Mockito.*;
 import org.apache.spark.network.TestUtils;
 import org.apache.spark.network.TransportContext;
 import org.apache.spark.network.buffer.ManagedBuffer;
-import org.apache.spark.network.client.ChunkReceivedCallback;
-import org.apache.spark.network.client.RpcResponseCallback;
-import org.apache.spark.network.client.TransportClient;
-import org.apache.spark.network.client.TransportClientFactory;
 import org.apache.spark.network.server.OneForOneStreamManager;
 import org.apache.spark.network.server.RpcHandler;
 import org.apache.spark.network.server.StreamManager;
@@ -232,6 +231,7 @@ public class SaslIntegrationSuite {
 
       CountDownLatch chunkReceivedLatch = new CountDownLatch(1);
       ChunkReceivedCallback callback = new ChunkReceivedCallback() {
+
         @Override
         public void onSuccess(int chunkIndex, ManagedBuffer buffer) {
           chunkReceivedLatch.countDown();
@@ -244,7 +244,8 @@ public class SaslIntegrationSuite {
       };
 
       exception.set(null);
-      client2.fetchChunk(streamId, 0, callback);
+      Supplier<StreamCallback<StreamChunkId>> streamCallbackFactory = mock(Supplier.class);
+      client2.fetchChunk(streamId, 0, callback, streamCallbackFactory);
       chunkReceivedLatch.await();
       checkSecurityException(exception.get());
     } finally {

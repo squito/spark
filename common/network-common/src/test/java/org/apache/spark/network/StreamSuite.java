@@ -308,7 +308,7 @@ public class StreamSuite {
 
   }
 
-  private static class TestCallback implements StreamCallback {
+  private static class TestCallback implements StreamCallback<String> {
 
     private final OutputStream out;
     public volatile boolean completed;

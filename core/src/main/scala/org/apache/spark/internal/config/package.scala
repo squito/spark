@@ -559,4 +559,13 @@ package object config {
       .intConf
       .checkValue(v => v > 0, "The value should be a positive integer.")
       .createWithDefault(2000)
+
+  private[spark] val EXECUTOR_PLUGINS =
+    ConfigBuilder("spark.executor.plugins")
+      .internal()
+      .doc("Comma-separated list of class names for \"plugins\" to run on executor startup.  Each" +
+        " should have a no-arg apply() static method")
+      .stringConf
+      .toSequence
+      .createOptional
 }

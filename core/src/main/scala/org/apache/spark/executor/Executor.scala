@@ -33,6 +33,7 @@ import scala.util.control.NonFatal
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 
 import org.apache.spark._
+import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.config._
@@ -131,8 +132,8 @@ private[spark] class Executor(
   private val replClassLoader = addReplClassLoaderIfNeeded(urlClassLoader)
 
   Thread.currentThread().setContextClassLoader(replClassLoader)
-  conf.get(EXECUTOR_PLUGINS).foreach { classes =>
-    Utils.loadExtensions(classOf[Object], classes, conf)
+  val plugins = conf.get(EXECUTOR_PLUGINS).toSeq.flatMap { classes =>
+    Utils.loadExtensions(classOf[ExecutorPlugin], classes, conf)
   }
 
 
@@ -373,7 +374,8 @@ private[spark] class Executor(
           val res = task.run(
             taskAttemptId = taskId,
             attemptNumber = taskDescription.attemptNumber,
-            metricsSystem = env.metricsSystem)
+            metricsSystem = env.metricsSystem,
+            plugins)
           threwException = false
           res
         } finally {
@@ -843,4 +845,9 @@ private[spark] object Executor {
   // task is fully deserialized. When possible, the TaskContext.getLocalProperty call should be
   // used instead.
   val taskDeserializationProps: ThreadLocal[Properties] = new ThreadLocal[Properties]
+}
+
+@DeveloperApi
+trait ExecutorPlugin extends TaskCompletionListener with TaskFailureListener {
+  def taskStart(taskContext: TaskContext): Unit
 }

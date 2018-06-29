@@ -21,7 +21,7 @@ import java.nio.ByteBuffer
 import java.util.Properties
 
 import org.apache.spark._
-import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.executor.{ExecutorPlugin, TaskMetrics}
 import org.apache.spark.internal.config.APP_CALLER_CONTEXT
 import org.apache.spark.memory.{MemoryMode, TaskMemoryManager}
 import org.apache.spark.metrics.MetricsSystem
@@ -75,7 +75,8 @@ private[spark] abstract class Task[T](
   final def run(
       taskAttemptId: Long,
       attemptNumber: Int,
-      metricsSystem: MetricsSystem): T = {
+      metricsSystem: MetricsSystem,
+      executorPlugins: Seq[ExecutorPlugin]): T = {
     SparkEnv.get.blockManager.registerTask(taskAttemptId)
     context = new TaskContextImpl(
       stageId,
@@ -92,6 +93,11 @@ private[spark] abstract class Task[T](
 
     if (_reasonIfKilled != null) {
       kill(interruptThread = false, _reasonIfKilled)
+    }
+    executorPlugins.foreach { executorPlugin =>
+      executorPlugin.taskStart(context)
+      context.addTaskCompletionListener(executorPlugin)
+      context.addTaskFailureListener(executorPlugin)
     }
 
     new CallerContext(

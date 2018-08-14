@@ -21,6 +21,7 @@ import java.io._
 import java.net._
 import java.nio.charset.StandardCharsets
 import java.util.{ArrayList => JArrayList, List => JList, Map => JMap}
+import java.util.concurrent.CountDownLatch
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -37,6 +38,7 @@ import org.apache.spark.api.java.{JavaPairRDD, JavaRDD, JavaSparkContext}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.input.PortableDataStream
 import org.apache.spark.internal.Logging
+import org.apache.spark.network.util.JavaUtils
 import org.apache.spark.rdd.RDD
 import org.apache.spark.security.SocketAuthHelper
 import org.apache.spark.util._
@@ -191,8 +193,8 @@ private[spark] object PythonRDD extends Logging {
     }
   }
 
-  def readBroadcastFromFile(sc: JavaSparkContext, path: String): Broadcast[PythonBroadcast] = {
-    sc.broadcast(new PythonBroadcast(path))
+  def setupBroadcast(path: String): PythonBroadcast = {
+    new PythonBroadcast(path)
   }
 
   def writeIteratorToStream[T](iter: Iterator[T], dataOut: DataOutputStream) {
@@ -402,34 +404,24 @@ private[spark] object PythonRDD extends Logging {
    *         data collected from this job, and the secret for authentication.
    */
   def serveIterator(items: Iterator[_], threadName: String): Array[Any] = {
-    val serverSocket = new ServerSocket(0, 1, InetAddress.getByName("localhost"))
-    // Close the socket if no connection in 15 seconds
-    serverSocket.setSoTimeout(15000)
-
-    new Thread(threadName) {
-      setDaemon(true)
-      override def run() {
-        try {
-          val sock = serverSocket.accept()
-          authHelper.authClient(sock)
-
-          val out = new DataOutputStream(new BufferedOutputStream(sock.getOutputStream))
-          Utils.tryWithSafeFinally {
-            writeIteratorToStream(items, out)
-          } {
-            out.close()
-            sock.close()
-          }
-        } catch {
-          case NonFatal(e) =>
-            logError(s"Error while sending iterator", e)
-        } finally {
-          serverSocket.close()
+    val (port, secret) = PythonSocketUtils.setupOneConnectionServer(
+        authHelper,
+        threadName
+    ) { sock =>
+      try {
+        val out = new DataOutputStream(new BufferedOutputStream(sock.getOutputStream))
+        Utils.tryWithSafeFinally {
+          writeIteratorToStream(items, out)
+        } {
+          JavaUtils.closeQuietly(out)
+          JavaUtils.closeQuietly(sock)
         }
+      } catch {
+        case NonFatal(e) =>
+          logError(s"Error while sending iterator", e)
       }
-    }.start()
-
-    Array(serverSocket.getLocalPort, authHelper.secret)
+    }
+    Array(port, secret)
   }
 
   private def getMergedConf(confAsMap: java.util.HashMap[String, String],
@@ -647,13 +639,11 @@ private[spark] class PythonAccumulatorV2(
   }
 }
 
-/**
- * A Wrapper for Python Broadcast, which is written into disk by Python. It also will
- * write the data into disk after deserialization, then Python can read it from disks.
- */
 // scalastyle:off no.finalize
 private[spark] class PythonBroadcast(@transient var path: String) extends Serializable
-  with Logging {
+    with Logging {
+
+  private val receiveLatch = new CountDownLatch(1)
 
   /**
    * Read data from disks, then copy it to `out`
@@ -696,5 +686,143 @@ private[spark] class PythonBroadcast(@transient var path: String) extends Serial
     }
     super.finalize()
   }
+
+  def setupEncryptionServer(): Array[Any] = {
+    val env = SparkEnv.get
+    val authHelper = new SocketAuthHelper(env.conf)
+    val (port, secret) = PythonSocketUtils.setupOneConnectionServer(
+        authHelper,
+        "broadcast-encrypt-server"
+    ) { sock =>
+      // We might be serializing a really large object -- we don't want
+      // python to buffer the whole thing in memory, nor can it write to a file,
+      // so we don't know the length in advance.  So python writes it in chunks, each chunk
+      // preceeded by a length, till we get a "length" of -1 which serves as EOF
+      val in = sock.getInputStream()
+      val dir = new File(Utils.getLocalDir(env.conf))
+      val file = File.createTempFile("broadcast", "", dir)
+      path = file.getAbsolutePath
+      val out = env.serializerManager.wrapForEncryption(new FileOutputStream(path))
+      PythonBroadcast.readChunkedStream(in, out)
+      receiveLatch.countDown()
+    }
+    Array(port, secret)
+  }
+
+  def waitTillDataReceived(): Unit = receiveLatch.await()
 }
 // scalastyle:on no.finalize
+
+private[spark] object PythonBroadcast {
+  /**
+   * The inverse of pyspark's ChunkedStream for sending broadcast data.  Closes both streams.
+   * Tested from python tests.
+   */
+  def readChunkedStream(in: InputStream, out: OutputStream): Unit = {
+    val dataIn = new DataInputStream(in)
+    Utils.tryWithSafeFinally {
+      val buffer = new Array[Byte](8192)
+      var nextLength = dataIn.readInt()
+      while (nextLength != -1) {
+        var remaining = nextLength
+        while (remaining > 0) {
+          val read = in.read(buffer, 0, math.min(buffer.length, remaining))
+          assert(read > 0)
+          remaining -= read
+          out.write(buffer, 0, read)
+        }
+        nextLength = dataIn.readInt()
+      }
+    } {
+      JavaUtils.closeQuietly(out)
+      JavaUtils.closeQuietly(in)
+    }
+  }
+}
+
+/**
+ * Sends decrypted broadcast data to python worker.  See [[PythonRunner]] for entire protocol.
+ */
+private[spark] class EncryptedPythonBroadcastServer(
+    env: SparkEnv,
+    idsAndFiles: Seq[(Long, String)]) extends Logging {
+
+  val (port, secret) = {
+    PythonSocketUtils.setupOneConnectionServer(
+      new SocketAuthHelper(env.conf),
+      "broadcast-decrypt-server"
+    )(serveAllBroadcastVars)
+  }
+
+  private val servingLatch = new CountDownLatch(1)
+
+  def serveAllBroadcastVars(socket: Socket): Unit = {
+    val out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()))
+    var socketIn: InputStream = null
+    // send the broadcast id, then the decrypted data.  We don't need to send the length, the
+    // the python pickle module just needs a stream.
+    Utils.tryWithSafeFinally {
+      (idsAndFiles).foreach { case (id, path) =>
+        logTrace(s"sending broadcast $id")
+        out.writeLong(id)
+        val in = env.serializerManager.wrapForEncryption(new FileInputStream(path))
+        Utils.tryWithSafeFinally {
+          Utils.copyStream(in, out, false)
+        } {
+          in.close()
+        }
+      }
+      logTrace("waiting for python to accept broadcast data over socket")
+      out.flush()
+      socketIn = socket.getInputStream()
+      socketIn.read()
+      logTrace("done serving broadcast data")
+    } {
+      JavaUtils.closeQuietly(socketIn)
+      JavaUtils.closeQuietly(out)
+    }
+    servingLatch.countDown()
+  }
+
+  def waitTillBroadcastDataSent(): Unit = {
+    servingLatch.await()
+  }
+}
+
+private[spark] object PythonSocketUtils {
+
+  /**
+   * Create a socket server and run user function on the socket in a background thread.
+   *
+   * The socket server can only accept one connection, or close if no connection
+   * in 15 seconds.
+   *
+   * The thread will terminate after the supplied user function, or if there are any exceptions.
+   *
+   * @return The port number of a local socket and the secret for authentication.
+   */
+  def setupOneConnectionServer(
+      authHelper: SocketAuthHelper,
+      threadName: String)
+      (func: Socket => Unit): (Int, String) = {
+    val serverSocket = new ServerSocket(0, 1, InetAddress.getByAddress(Array(127, 0, 0, 1)))
+    // Close the socket if no connection in 15 seconds
+    serverSocket.setSoTimeout(15000)
+
+    new Thread(threadName) {
+      setDaemon(true)
+      override def run(): Unit = {
+        var sock: Socket = null
+        try {
+          sock = serverSocket.accept()
+          authHelper.authClient(sock)
+          func(sock)
+        } finally {
+          JavaUtils.closeQuietly(serverSocket)
+          JavaUtils.closeQuietly(sock)
+        }
+      }
+    }.start()
+    (serverSocket.getLocalPort, authHelper.secret)
+  }
+}

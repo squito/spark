@@ -189,6 +189,13 @@ class SparkContext(object):
         self._javaAccumulator = self._jvm.PythonAccumulatorV2(host, port, auth_token)
         self._jsc.sc().register(self._javaAccumulator)
 
+        # If encryption is enabled, we need to setup a server in the jvm to read broadcast
+        # data via a socket.
+        # scala's mangled names w/ $ in them require special treatment.
+        encryption_conf = self._jvm.org.apache.spark.internal.config.__getattr__("package$")\
+            .__getattr__("MODULE$").IO_ENCRYPTION_ENABLED()
+        self._encryption_enabled = self._jsc.sc().conf().get(encryption_conf)
+
         self.pythonExec = os.environ.get("PYSPARK_PYTHON", 'python')
         self.pythonVer = "%d.%d" % sys.version_info[:2]
 

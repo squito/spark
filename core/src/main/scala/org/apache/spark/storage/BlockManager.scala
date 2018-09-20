@@ -1787,17 +1787,11 @@ private[spark] object BlockManager {
     }
   }
 
-  private def hex(buf: ByteBuffer): String = {
-    val (bytesToShow, len) = if (buf.hasArray) {
-      val arr = buf.array
-      val b = if (arr.length > 1000) arr.slice(0, 1000) else arr
-      (b, arr.length)
-    } else {
-      val length = math.min(buf.remaining(), 1000)
-      val bytes = new Array[Byte](length)
-      buf.duplicate.get(bytes, 0, length)
-      (bytes, buf.remaining())
-    }
+  def hex(buf: ByteBuffer): String = {
+    val len = buf.remaining()
+    val length = math.min(buf.remaining(), 1000)
+    val bytesToShow = new Array[Byte](length)
+    buf.duplicate.get(bytesToShow, 0, length)
     "(length = " + len + ") " + new String(Hex.encodeHex(bytesToShow))
   }
 

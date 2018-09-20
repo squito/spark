@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
+import org.apache.commons.codec.binary.Hex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -166,6 +167,7 @@ public class OneForOneBlockFetcher {
 
     @Override
     public void onData(String streamId, ByteBuffer buf) throws IOException {
+      logger.info("Received bytes " + hex(buf));
       while (buf.hasRemaining()) {
         channel.write(buf);
       }
@@ -188,4 +190,26 @@ public class OneForOneBlockFetcher {
       targetFile.delete();
     }
   }
+
+  private String hex(ByteBuffer buf) {
+    long len = 0;
+    byte[] bytesToShow = null;
+    if (buf.hasArray()) {
+      byte[] arr = buf.array();
+      len = arr.length;
+      if (arr.length > 1000) {
+        bytesToShow = new byte[1000];
+        System.arraycopy(arr, 0, bytesToShow, 0, 1000);
+      } else {
+        bytesToShow = arr;
+      }
+    } else {
+      len = buf.remaining();
+      int length = Math.min(buf.remaining(), 1000);
+      bytesToShow = new byte[length];
+      buf.duplicate().get(bytesToShow, 0, length);
+    }
+    return "(length = " + len + ") " + new String(Hex.encodeHex(bytesToShow));
+  }
+
 }

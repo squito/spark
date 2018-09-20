@@ -23,6 +23,7 @@ import io.netty.util.AbstractReferenceCounted
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.network.util.AbstractFileRegion
+import org.apache.spark.storage.BlockManager
 
 
 /**
@@ -32,7 +33,7 @@ import org.apache.spark.network.util.AbstractFileRegion
  */
 private[io] class ChunkedByteBufferFileRegion(
     private val chunkedByteBuffer: ChunkedByteBuffer,
-    private val ioChunkSize: Int) extends AbstractFileRegion {
+    private val ioChunkSize: Int) extends AbstractFileRegion with Logging {
 
   private var _transferred: Long = 0
   // this duplicates the original chunks, so we're free to modify the position, limit, etc.
@@ -62,6 +63,10 @@ private[io] class ChunkedByteBufferFileRegion(
         val originalLimit = currentChunk.limit()
         currentChunk.limit(currentChunk.position() + ioSize)
         val thisWriteSize = target.write(currentChunk)
+        logInfo(s"wrote $thisWriteSize bytes, now at position ${currentChunk.position()}")
+        val bytesToShow = currentChunk.duplicate()
+        bytesToShow.position(currentChunk.position() - thisWriteSize)
+        logInfo(BlockManager.hex(bytesToShow))
         currentChunk.limit(originalLimit)
         written += thisWriteSize
         if (thisWriteSize < ioSize) {

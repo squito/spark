@@ -39,11 +39,20 @@ private[spark] case class ProcfsBasedSystemsMetrics(
 
 // Some of the ideas here are taken from the ProcfsBasedProcessTree class in hadoop
 // project.
-private[spark] class ProcfsBasedSystems(val procfsDir: String = "/proc/") extends Logging {
+private[spark] class ProcfsBasedSystems(
+    val procfsDir: String,
+    val pageSize: Long,
+    val testing: Boolean) extends Logging {
+
+  def this() {
+    this(
+      "/proc/",
+      ProcfsBasedSystems.computePageSize(false),
+      sys.env.contains("SPARK_TESTING") || sys.props.contains("spark.testing"))
+  }
+
   val procfsStatFile = "stat"
-  val testing = sys.env.contains("SPARK_TESTING") || sys.props.contains("spark.testing")
-  var pageSize = computePageSize()
-  var isAvailable: Boolean = isProcfsAvailable
+  var isAvailable: Boolean = pageSize > 0 && isProcfsAvailable
   private val pid = computePid()
 
   // var allMetrics: ProcfsBasedSystemsMetrics = ProcfsBasedSystemsMetrics(0, 0, 0, 0, 0, 0)
@@ -92,22 +101,6 @@ private[spark] class ProcfsBasedSystems(val procfsDir: String = "/proc/") extend
         " As a result reporting of ProcessTree metrics is stopped", e)
         isAvailable = false
         return -1
-    }
-  }
-
-  private def computePageSize(): Long = {
-    if (testing) {
-      return 0;
-    }
-    try {
-      val cmd = Array("getconf", "PAGESIZE")
-      val out = Utils.executeAndGetOutput(cmd)
-      return Integer.parseInt(out.split("\n")(0))
-    } catch {
-      case e: Exception => logWarning("Exception when trying to compute pagesize, as a" +
-        " result reporting of ProcessTree metrics is stopped")
-        isAvailable = false
-        return 0
     }
   }
 
@@ -225,4 +218,24 @@ private[spark] class ProcfsBasedSystems(val procfsDir: String = "/proc/") extend
     }
     return allMetrics
   }
+}
+
+private[spark] object ProcfsBasedSystems extends Logging {
+
+  private def computePageSize(testing: Boolean): Long = {
+    if (testing) {
+      return 0;
+    }
+    try {
+      val cmd = Array("getconf", "PAGESIZE")
+      val out = Utils.executeAndGetOutput(cmd)
+      Integer.parseInt(out.split("\n")(0))
+    } catch {
+      case e: Exception =>
+        logWarning("Exception when trying to compute pagesize, as a" +
+        " result reporting of ProcessTree metrics is stopped")
+        return 0
+    }
+  }
+
 }

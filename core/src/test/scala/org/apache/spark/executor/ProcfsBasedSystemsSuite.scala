@@ -22,8 +22,7 @@ import org.apache.spark.SparkFunSuite
 
 class ProcfsBasedSystemsSuite extends SparkFunSuite {
 
-  val p = new ProcfsBasedSystems(getTestResourcePath("ProcessTree"))
-  p.pageSize = 4096L
+  val p = new ProcfsBasedSystems(getTestResourcePath("ProcessTree"), 4096L, true)
 
   test("testGetProcessInfo") {
     var r = ProcfsBasedSystemsMetrics(0, 0, 0, 0, 0, 0)

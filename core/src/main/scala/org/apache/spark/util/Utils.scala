@@ -24,7 +24,7 @@ import java.lang.reflect.InvocationTargetException
 import java.math.{MathContext, RoundingMode}
 import java.net._
 import java.nio.ByteBuffer
-import java.nio.channels.{Channels, FileChannel}
+import java.nio.channels.{Channels, FileChannel, WritableByteChannel}
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.security.SecureRandom
@@ -298,12 +298,12 @@ private[spark] object Utils extends Logging {
       transferToEnabled: Boolean = false): Long = {
     tryWithSafeFinally {
       if (in.isInstanceOf[FileInputStream] && out.isInstanceOf[FileOutputStream]
-        && transferToEnabled) {
+          && transferToEnabled) {
         // When both streams are File stream, use transferTo to improve copy performance.
         val inChannel = in.asInstanceOf[FileInputStream].getChannel()
         val outChannel = out.asInstanceOf[FileOutputStream].getChannel()
         val size = inChannel.size()
-        copyFileStreamNIO(inChannel, outChannel, 0, size)
+        copyChannelsNIO(inChannel, outChannel, 0, size)
         size
       } else {
         var count = 0L
@@ -329,12 +329,15 @@ private[spark] object Utils extends Logging {
     }
   }
 
-  def copyFileStreamNIO(
+  def copyChannelsNIO(
       input: FileChannel,
-      output: FileChannel,
+      output: WritableByteChannel,
       startPosition: Long,
       bytesToCopy: Long): Unit = {
-    val initialPos = output.position()
+    val initialPos = output match {
+      case f: FileChannel => f.position()
+      case other => 0L
+    }
     var count = 0L
     // In case transferTo method transferred less data than we have required.
     while (count < bytesToCopy) {
@@ -342,22 +345,25 @@ private[spark] object Utils extends Logging {
     }
     assert(count == bytesToCopy,
       s"request to copy $bytesToCopy bytes, but actually copied $count bytes.")
-
-    // Check the position after transferTo loop to see if it is in the right position and
-    // give user information if not.
-    // Position will not be increased to the expected length after calling transferTo in
-    // kernel version 2.6.32, this issue can be seen in
-    // https://bugs.openjdk.java.net/browse/JDK-7052359
-    // This will lead to stream corruption issue when using sort-based shuffle (SPARK-3948).
-    val finalPos = output.position()
-    val expectedPos = initialPos + bytesToCopy
-    assert(finalPos == expectedPos,
-      s"""
-         |Current position $finalPos do not equal to expected position $expectedPos
-         |after transferTo, please check your kernel version to see if it is 2.6.32,
-         |this is a kernel bug which will lead to unexpected behavior when using transferTo.
-         |You can set spark.file.transferTo = false to disable this NIO feature.
+    output match {
+      case f: FileChannel =>
+        // Check the position after transferTo loop to see if it is in the right position and
+        // give user information if not.
+        // Position will not be increased to the expected length after calling transferTo in
+        // kernel version 2.6.32, this issue can be seen in
+        // https://bugs.openjdk.java.net/browse/JDK-7052359
+        // This will lead to stream corruption issue when using sort-based shuffle (SPARK-3948).
+        val finalPos = f.position()
+        val expectedPos = initialPos + bytesToCopy
+        assert(finalPos == expectedPos,
+          s"""
+             |Current position $finalPos do not equal to expected position $expectedPos
+             |after transferTo, please check your kernel version to see if it is 2.6.32,
+             |this is a kernel bug which will lead to unexpected behavior when using transferTo.
+             |You can set spark.file.transferTo = false to disable this NIO feature.
            """.stripMargin)
+    }
+
   }
 
   /**

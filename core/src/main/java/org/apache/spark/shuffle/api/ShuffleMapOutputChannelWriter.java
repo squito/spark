@@ -19,11 +19,9 @@ package org.apache.spark.shuffle.api;
 
 import java.io.IOException;
 
-public interface ShuffleMapOutputWriter {
+public interface ShuffleMapOutputChannelWriter extends ShuffleMapOutputWriter {
 
-  ShufflePartitionWriter newPartitionWriter(int partitionId);
+  @Override
+  ShufflePartitionChannelWriter newPartitionWriter(int partitionId);
 
-  void commitAllPartitions();
-
-  void abort(Exception exception) throws IOException;
 }

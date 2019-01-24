@@ -20,8 +20,10 @@ package org.apache.spark.shuffle.sort;
 import javax.annotation.Nullable;
 import java.io.*;
 import java.nio.channels.FileChannel;
+import java.nio.channels.WritableByteChannel;
 import java.util.Iterator;
 
+import org.apache.spark.shuffle.api.*;
 import scala.Option;
 import scala.Product2;
 import scala.collection.JavaConverters;
@@ -51,9 +53,6 @@ import org.apache.spark.serializer.SerializationStream;
 import org.apache.spark.serializer.SerializerInstance;
 import org.apache.spark.shuffle.IndexShuffleBlockResolver;
 import org.apache.spark.shuffle.ShuffleWriter;
-import org.apache.spark.shuffle.api.ShuffleMapOutputWriter;
-import org.apache.spark.shuffle.api.ShufflePartitionWriter;
-import org.apache.spark.shuffle.api.ShuffleWriteSupport;
 import org.apache.spark.storage.BlockManager;
 import org.apache.spark.storage.TimeTrackingOutputStream;
 import org.apache.spark.unsafe.Platform;
@@ -298,6 +297,7 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     final boolean fastMergeIsSupported = !compressionEnabled ||
       CompressionCodec$.MODULE$.supportsConcatenationOfSerializedStreams(compressionCodec);
     final boolean encryptionEnabled = blockManager.serializerManager().encryptionEnabled();
+    ShuffleMapOutputWriter writer = null;
     try {
       if (spills.length == 0) {
         new FileOutputStream(outputFile).close(); // Create an empty file
@@ -323,15 +323,24 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
         // strategies use different IO techniques.  We count IO during merge towards the shuffle
         // shuffle write time, which appears to be consistent with the "not bypassing merge-sort"
         // branch in ExternalSorter.
+
+        if (pluggableWriteSupport == null) {
+          writer = new LocalShuffleMapOutputWriter(shuffleBlockResolver, shuffleId, mapId);
+        } else {
+          writer = pluggableWriteSupport.newMapOutputWriter(sparkConf.getAppId(), shuffleId, mapId);
+        }
         if (pluggableWriteSupport != null) {
           partitionLengths = mergeSpillsWithPluggableWriter(spills, compressionCodec);
         } else if (fastMergeEnabled && fastMergeIsSupported) {
           // Compression is disabled or we are using an IO compression codec that supports
           // decompression of concatenated compressed streams, so we can perform a fast spill merge
           // that doesn't need to interpret the spilled bytes.
-          if (transferToEnabled && !encryptionEnabled) {
+          if (transferToEnabled &&
+                !encryptionEnabled &&
+                (writer instanceof ShuffleMapOutputChannelWriter)) {
             logger.debug("Using transferTo-based fast merge");
-            partitionLengths = mergeSpillsWithTransferTo(spills, outputFile);
+            partitionLengths =
+                mergeSpillsWithTransferTo(spills, (ShuffleMapOutputChannelWriter) writer);
           } else {
             logger.debug("Using fileStream-based fast merge");
             partitionLengths = mergeSpillsWithFileStream(spills, outputFile, null);
@@ -352,6 +361,9 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
         return partitionLengths;
       }
     } catch (IOException e) {
+      if (writer != null) {
+        writer.abort(e);
+      }
       if (outputFile.exists() && !outputFile.delete()) {
         logger.error("Unable to delete output file {}", outputFile.getPath());
       }
@@ -449,32 +461,29 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
    *
    * @return the partition lengths in the merged file.
    */
-  private long[] mergeSpillsWithTransferTo(SpillInfo[] spills, File outputFile) throws IOException {
+  private long[] mergeSpillsWithTransferTo(SpillInfo[] spills, ShuffleMapOutputChannelWriter output) throws IOException {
     assert (spills.length >= 2);
     final int numPartitions = partitioner.numPartitions();
     final long[] partitionLengths = new long[numPartitions];
     final FileChannel[] spillInputChannels = new FileChannel[spills.length];
     final long[] spillInputChannelPositions = new long[spills.length];
-    FileChannel mergedFileOutputChannel = null;
 
     boolean threwException = true;
     try {
       for (int i = 0; i < spills.length; i++) {
         spillInputChannels[i] = new FileInputStream(spills[i].file).getChannel();
       }
-      // This file needs to opened in append mode in order to work around a Linux kernel bug that
-      // affects transferTo; see SPARK-3948 for more details.
-      mergedFileOutputChannel = new FileOutputStream(outputFile, true).getChannel();
-
       long bytesWrittenToMergedFile = 0;
       for (int partition = 0; partition < numPartitions; partition++) {
+        ShufflePartitionChannelWriter writer = output.newPartitionWriter(partition);
+        WritableByteChannel channel = writer.openPartitionChannel();
         for (int i = 0; i < spills.length; i++) {
           final long partitionLengthInSpill = spills[i].partitionLengths[partition];
           final FileChannel spillInputChannel = spillInputChannels[i];
           final long writeStartTime = System.nanoTime();
-          Utils.copyFileStreamNIO(
+          Utils.copyChannelsNIO(
             spillInputChannel,
-            mergedFileOutputChannel,
+            channel,
             spillInputChannelPositions[i],
             partitionLengthInSpill);
           spillInputChannelPositions[i] += partitionLengthInSpill;
@@ -482,20 +491,9 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
           bytesWrittenToMergedFile += partitionLengthInSpill;
           partitionLengths[partition] += partitionLengthInSpill;
         }
+        writer.commitAndGetTotalLength();
       }
-      // Check the position after transferTo loop to see if it is in the right position and raise an
-      // exception if it is incorrect. The position will not be increased to the expected length
-      // after calling transferTo in kernel version 2.6.32. This issue is described at
-      // https://bugs.openjdk.java.net/browse/JDK-7052359 and SPARK-3948.
-      if (mergedFileOutputChannel.position() != bytesWrittenToMergedFile) {
-        throw new IOException(
-          "Current position " + mergedFileOutputChannel.position() + " does not equal expected " +
-            "position " + bytesWrittenToMergedFile + " after transferTo. Please check your kernel" +
-            " version to see if it is 2.6.32, as there is a kernel bug which will lead to " +
-            "unexpected behavior when using transferTo. You can set spark.file.transferTo=false " +
-            "to disable this NIO feature."
-        );
-      }
+      // We don't need to check the position again here, because Utils.copy() already does it
       threwException = false;
     } finally {
       // To avoid masking exceptions that caused us to prematurely enter the finally block, only
@@ -504,7 +502,9 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
         assert(spillInputChannelPositions[i] == spills[i].file.length());
         Closeables.close(spillInputChannels[i], threwException);
       }
-      Closeables.close(mergedFileOutputChannel, threwException);
+      // We don't need to close the data output of the ShuffleMapOutputWriter here -- it will
+      // get closed at a higher level.  That will also ensure it closes any resources of
+      // individual ShufflePartitionWriters.
     }
     return partitionLengths;
   }

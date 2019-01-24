@@ -14,16 +14,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.spark.shuffle.api;
 
 import java.io.IOException;
+import java.nio.channels.WritableByteChannel;
 
-public interface ShuffleMapOutputWriter {
+/**
+ * An extension of ShufflePartitionWriter for shuffle storage implementations that allow transfering
+ * shuffle data directly to a WritableByteChannel, rather than an OutputStream.
+ *
+ * Callers may choose to use either the Channel or the OutputStream, but they must not mix usage of
+ * both.
+ */
+public interface ShufflePartitionChannelWriter extends ShufflePartitionWriter {
 
-  ShufflePartitionWriter newPartitionWriter(int partitionId);
-
-  void commitAllPartitions();
-
-  void abort(Exception exception) throws IOException;
+  /**
+   * Get a channel to write data to, to allow a more efficient transfer of data.
+   *
+   * Note that implementations are free to return the same channel for all ShufflePartitionWriters
+   * of one ShuffleMapOutputWriter.
+   */
+  WritableByteChannel openPartitionChannel() throws IOException;
 }

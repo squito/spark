@@ -17,8 +17,15 @@
 
 package org.apache.spark.shuffle.api;
 
+import org.apache.spark.storage.BlockId;
+import scala.Tuple2;
+import scala.collection.Seq;
+
+import java.io.InputStream;
+import java.util.Iterator;
+
 public interface ShuffleReadSupport {
 
-  ShufflePartitionReader newPartitionReader(String appId, int shuffleId, int mapId);
+  Iterator<InputStream> fetchBlocks(String appId, int shuffleId, Iterator<Tuple2<Integer, Seq<BlockId>>> blocks);
 
 }

@@ -49,7 +49,8 @@ class BypassMergeSortShuffleWriterSuite extends SparkFunSuite with BeforeAndAfte
   private var taskMetrics: TaskMetrics = _
   private var tempDir: File = _
   private var outputFile: File = _
-  private val conf: SparkConf = new SparkConf(loadDefaults = false).set("spark.app.id", "spark-app-id")
+  private val conf: SparkConf =
+    new SparkConf(loadDefaults = false).set("spark.app.id", "spark-app-id")
   private val temporaryFilesCreated: mutable.Buffer[File] = new ArrayBuffer[File]()
   private val blockIdToFileMap: mutable.Map[BlockId, File] = new mutable.HashMap[BlockId, File]
   private var shuffleHandle: BypassMergeSortShuffleHandle[Int, Int] = _

@@ -19,6 +19,8 @@ package org.apache.spark.storage
 
 import java.nio.ByteBuffer
 
+import org.apache.commons.io.output.CountingOutputStream
+
 import org.apache.spark.serializer.{SerializationStream, SerializerInstance}
 import org.apache.spark.shuffle.ShufflePartitionWriterOutputStream
 import org.apache.spark.shuffle.api.{ShuffleMapOutputWriter, ShufflePartitionWriter}
@@ -40,6 +42,7 @@ private[spark] class ShufflePartitionObjectWriter(
 
   private var currentWriter: ShufflePartitionWriter = _
   private var objectOutputStream: SerializationStream = _
+  private var countingStream: CountingOutputStream = _
 
   def startNewPartition(partitionId: Int): Unit = {
     require(buffer.position() == 0,
@@ -48,14 +51,19 @@ private[spark] class ShufflePartitionObjectWriter(
     currentWriter = mapOutputWriter.newPartitionWriter(partitionId)
     val currentWriterStream = new ShufflePartitionWriterOutputStream(
       currentWriter, buffer, bufferSize)
-    objectOutputStream = serializerInstance.serializeStream(currentWriterStream)
+    countingStream = new CountingOutputStream(currentWriterStream)
+    objectOutputStream = serializerInstance.serializeStream(countingStream)
+    // TODO I actually think we should include compression & encryption here.  I'd revisit
+    // leaving that up to the plugin in a later revision.  Need to make sure the byte counts
+    // respect encryption & compression here
   }
 
   def commitCurrentPartition(): Long = {
     require(objectOutputStream != null, "Cannot commit a partition that has not been started.")
     require(currentWriter != null, "Cannot commit a partition that has not been started.")
     objectOutputStream.close()
-    val length = currentWriter.commitAndGetTotalLength()
+    val length = countingStream.getByteCount
+    currentWriter.commitAndGetTotalLength()
     buffer.reset()
     currentWriter = null
     objectOutputStream = null

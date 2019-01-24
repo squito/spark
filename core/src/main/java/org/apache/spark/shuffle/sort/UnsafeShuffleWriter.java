@@ -343,11 +343,11 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
                 mergeSpillsWithTransferTo(spills, (ShuffleMapOutputChannelWriter) writer);
           } else {
             logger.debug("Using fileStream-based fast merge");
-            partitionLengths = mergeSpillsWithFileStream(spills, outputFile, null);
+            partitionLengths = mergeSpillsWithFileStream(spills, writer, null);
           }
         } else {
           logger.debug("Using slow merge");
-          partitionLengths = mergeSpillsWithFileStream(spills, outputFile, compressionCodec);
+          partitionLengths = mergeSpillsWithFileStream(spills, writer, compressionCodec);
         }
         // When closing an UnsafeShuffleExternalSorter that has already spilled once but also has
         // in-memory records, we write out the in-memory records to a file but do not count that
@@ -389,19 +389,14 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
    */
   private long[] mergeSpillsWithFileStream(
       SpillInfo[] spills,
-      File outputFile,
+      ShuffleMapOutputWriter output,
       @Nullable CompressionCodec compressionCodec) throws IOException {
     assert (spills.length >= 2);
     final int numPartitions = partitioner.numPartitions();
     final long[] partitionLengths = new long[numPartitions];
     final InputStream[] spillInputStreams = new InputStream[spills.length];
 
-    final OutputStream bos = new BufferedOutputStream(
-        new FileOutputStream(outputFile),
-        outputBufferSizeInBytes);
-    // Use a counting output stream to avoid having to close the underlying file and ask
-    // the file system for its size after each partition is written.
-    final CountingOutputStream mergedFileOutputStream = new CountingOutputStream(bos);
+    CountingOutputAndUnderlying currentCountingOut = null;
 
     boolean threwException = true;
     try {
@@ -411,12 +406,17 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
             inputBufferSizeInBytes);
       }
       for (int partition = 0; partition < numPartitions; partition++) {
-        final long initialFileLength = mergedFileOutputStream.getByteCount();
+        // Use a counting output stream to avoid having to close the underlying file and ask
+        // the file system for its size after each partition is written.
+        final ShufflePartitionWriter writer = output.newPartitionWriter(partition);
+        currentCountingOut = countingOutputForPartition(currentCountingOut, writer);
+        final CountingOutputStream out = currentCountingOut.countingOut;
+        final long initialFileLength = out.getByteCount();
         // Shield the underlying output stream from close() and flush() calls, so that we can close
         // the higher level streams to make sure all data is really flushed and internal state is
         // cleaned.
         OutputStream partitionOutput = new CloseAndFlushShieldOutputStream(
-          new TimeTrackingOutputStream(writeMetrics, mergedFileOutputStream));
+          new TimeTrackingOutputStream(writeMetrics, out));
         partitionOutput = blockManager.serializerManager().wrapForEncryption(partitionOutput);
         if (compressionCodec != null) {
           partitionOutput = compressionCodec.compressedOutputStream(partitionOutput);
@@ -440,7 +440,9 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
         }
         partitionOutput.flush();
         partitionOutput.close();
-        partitionLengths[partition] = (mergedFileOutputStream.getByteCount() - initialFileLength);
+        partitionLengths[partition] = (out.getByteCount() - initialFileLength);
+        writer.commitAndGetTotalLength();
+
       }
       threwException = false;
     } finally {
@@ -449,9 +451,40 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
       for (InputStream stream : spillInputStreams) {
         Closeables.close(stream, threwException);
       }
-      Closeables.close(mergedFileOutputStream, threwException);
     }
     return partitionLengths;
+  }
+
+  private CountingOutputAndUnderlying countingOutputForPartition(CountingOutputAndUnderlying prevOut, ShufflePartitionWriter writer) throws IOException {
+    // TODO this whole construct probably isn't necessary ... I think I can subclass
+    // BufferedOutputStream to reuse the buffer.
+    if (prevOut == null) {
+      OutputStream underlying = writer.openPartitionStream();
+      CountingOutputStream countingOut = new CountingOutputStream(new BufferedOutputStream(
+          writer.openPartitionStream(), outputBufferSizeInBytes));
+      return new CountingOutputAndUnderlying(countingOut, underlying);
+    } else {
+      // some implementations will reuse the same output stream (eg. just appending all output
+      // to one data file).  Avoid creating a new buffer in that case.
+      OutputStream newOutput = writer.openPartitionStream();
+      if (newOutput == prevOut.underlying) {
+        return prevOut;
+      } else {
+        CountingOutputStream countingOut = new CountingOutputStream(new BufferedOutputStream(
+            writer.openPartitionStream(), outputBufferSizeInBytes));
+        return new CountingOutputAndUnderlying(countingOut, newOutput);
+      }
+    }
+  }
+
+  private class CountingOutputAndUnderlying {
+    final CountingOutputStream countingOut;
+    final OutputStream underlying;
+
+    public CountingOutputAndUnderlying(CountingOutputStream countingOut, OutputStream underlying) {
+      this.countingOut = countingOut;
+      this.underlying = underlying;
+    }
   }
 
   /**
@@ -562,7 +595,7 @@ public class UnsafeShuffleWriter<K, V> extends ShuffleWriter<K, V> {
           throw e;
         }
       }
-      mapOutputWriter.commitAllPartitions();
+      mapOutputWriter.commitAllPartitions(partitionLengths);
       threwException = false;
     } catch (Exception e) {
       try {

@@ -18,9 +18,9 @@ package org.apache.spark.shuffle.sort;
 
 import org.apache.spark.network.util.JavaUtils;
 import org.apache.spark.shuffle.IndexShuffleBlockResolver;
-import org.apache.spark.shuffle.api.ShuffleMapOutputWriter;
+import org.apache.spark.shuffle.api.ShuffleMapOutputChannelWriter;
 import org.apache.spark.shuffle.api.ShufflePartitionChannelWriter;
-import org.apache.spark.shuffle.api.ShufflePartitionWriter;
+import org.apache.spark.util.Utils;
 
 import java.io.*;
 import java.nio.channels.FileChannel;
@@ -32,14 +32,13 @@ import java.nio.channels.WritableByteChannel;
  *
  * This corresponds to the only shuffle storage in spark <= 2.4.
  */
-public class LocalShuffleMapOutputWriter implements ShuffleMapOutputWriter {
+public class LocalShuffleMapOutputWriter implements ShuffleMapOutputChannelWriter {
 
   final IndexShuffleBlockResolver resolver;
   final int shuffleId;
   final int mapId;
-  long partitionLengths[];
 
-  File dataTmpFile;
+  final File dataTmpFile;
 
   FileChannel dataTmpFileOutputChannel = null;
   FileOutputStream dataTmpFileOutputStream = null;
@@ -48,15 +47,16 @@ public class LocalShuffleMapOutputWriter implements ShuffleMapOutputWriter {
     this.resolver = resolver;
     this.shuffleId = shuffleId;
     this.mapId = mapId;
+    this.dataTmpFile = Utils.tempFileWith(resolver.getDataFile(shuffleId, mapId));
   }
 
   @Override
-  public ShufflePartitionWriter newPartitionWriter(int partitionId) {
-    return null;
+  public ShufflePartitionChannelWriter newPartitionWriter(int partitionId) {
+    return new LocalShufflePartitionWriter();
   }
 
   @Override
-  public void commitAllPartitions() {
+  public void commitAllPartitions(long[] partitionLengths) {
     // this will delete the temporary index file itself if there is a failure
     resolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, dataTmpFile);
   }

@@ -778,7 +778,7 @@ private[spark] class ExternalSorter[K, V, C](
           }
         }
       }
-      mapOutputWriter.commitAllPartitions()
+      mapOutputWriter.commitAllPartitions(lengths)
     } catch {
       case e: Exception =>
         util.Utils.tryLogNonFatalError {

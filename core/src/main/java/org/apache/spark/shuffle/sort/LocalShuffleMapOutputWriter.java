@@ -57,6 +57,8 @@ public class LocalShuffleMapOutputWriter implements ShuffleMapOutputChannelWrite
 
   @Override
   public void commitAllPartitions(long[] partitionLengths) {
+    JavaUtils.closeQuietly(dataTmpFileOutputChannel);
+    JavaUtils.closeQuietly(dataTmpFileOutputStream);
     // this will delete the temporary index file itself if there is a failure
     resolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, dataTmpFile);
   }
@@ -65,6 +67,7 @@ public class LocalShuffleMapOutputWriter implements ShuffleMapOutputChannelWrite
   public void abort(Exception exception) throws IOException {
     JavaUtils.closeQuietly(dataTmpFileOutputChannel);
     JavaUtils.closeQuietly(dataTmpFileOutputStream);
+    // TODO I think we might also need to delete the final output file
     if (dataTmpFile.exists() && !dataTmpFile.delete()) {
       throw new IOException("failed to delete temporary shuffle output file " + dataTmpFile);
     }
@@ -75,7 +78,10 @@ public class LocalShuffleMapOutputWriter implements ShuffleMapOutputChannelWrite
     @Override
     public OutputStream openPartitionStream() throws FileNotFoundException {
       if (dataTmpFileOutputStream == null) {
+//        System.out.println("creating a fos for " + dataTmpFile);
         dataTmpFileOutputStream = new FileOutputStream(dataTmpFile);
+      } else {
+//        System.out.println("returning a handle on same fos for " + dataTmpFile);
       }
       return dataTmpFileOutputStream;
     }

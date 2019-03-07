@@ -184,23 +184,32 @@ private[spark] class TaskSetManager(
     t.epoch = epoch
   }
 
-  // An array to store preferred location and its task index
-  private val locationWithTaskIndex: ArrayBuffer[(String, Int)] = new ArrayBuffer[(String, Int)]()
-  private val addTaskStartTime = System.nanoTime()
-  // Add all our tasks to the pending lists. We do this in reverse order
-  // of task index so that tasks with low indices get launched first.
-  for (i <- (0 until numTasks).reverse) {
-    addPendingTask(i, true)
+  {
+    // Bulk initialize with tasks, so we can speed up rack resolution
+    // An array to store preferred location and its task index
+    val hostToIndices = new HashMap[String, HashSet[Int]]()
+    val addTaskStartTime = System.nanoTime()
+    // Add all our tasks to the pending lists. We do this in reverse order
+    // of task index so that tasks with low indices get launched first.
+    for (i <- (0 until numTasks).reverse) {
+      addPendingTask(i, Some(hostToIndices))
+    }
+    // Convert preferred location list to rack list in one invocation and zip with the origin index
+    val hosts = hostToIndices.keys.toSeq
+    val hostToRack: Map[String, String] = sched.getRacksForHosts(hostToIndices.keys.toSeq)
+      .zip(hosts).flatMap {
+        case (Some(rack), host) => Some(host -> rack)
+        case _ => None
+      }.toMap
+    hostToIndices.foreach {
+      case (host, indices) =>
+        hostToRack.get(host).foreach { rack =>
+          pendingTasksForRack.getOrElseUpdate(rack, new ArrayBuffer) ++= indices
+        }
+      case _ =>
+    }
+    logInfo(s"Adding pending tasks take ${(System.nanoTime() - addTaskStartTime) / 1e9} seconds")
   }
-  // Convert preferred location list to rack list in one invocation and zip with the origin index
-  private val rackWithTaskIndex = sched.getRacksForHosts(locationWithTaskIndex.map(_._1).toList)
-    .zip(locationWithTaskIndex.map(_._2))
-  rackWithTaskIndex.foreach {
-    case (Some(rack), index) =>
-      pendingTasksForRack.getOrElseUpdate(rack, new ArrayBuffer) += index
-    case _ =>
-  }
-  logInfo(s"Adding pending tasks take ${(System.nanoTime() - addTaskStartTime) / 1e9} seconds")
 
   /**
    * Track the set of locality levels which are valid given the tasks locality preferences and
@@ -226,7 +235,9 @@ private[spark] class TaskSetManager(
   private[scheduler] var emittedTaskSizeWarning = false
 
   /** Add a task to all the pending-task lists that it should be on. */
-  private[spark] def addPendingTask(index: Int, initializing: Boolean = false) {
+  private[spark] def addPendingTask(
+      index: Int,
+      hostToIndicesOpt: Option[HashMap[String, HashSet[Int]]] = None): Unit = {
     for (loc <- tasks(index).preferredLocations) {
       loc match {
         case e: ExecutorCacheTaskLocation =>
@@ -247,12 +258,15 @@ private[spark] class TaskSetManager(
       }
       pendingTasksForHost.getOrElseUpdate(loc.host, new ArrayBuffer) += index
 
-      if (initializing) {
-        locationWithTaskIndex += ((loc.host, index))
-      } else {
-        for (rack <- sched.getRackForHost(loc.host)) {
-          pendingTasksForRack.getOrElseUpdate(rack, new ArrayBuffer) += index
-        }
+      hostToIndicesOpt match {
+        case Some(hostToIndices) =>
+          // During initialization, we determine the rack with a bulk request for efficiency
+          hostToIndices.getOrElseUpdate(loc.host, new HashSet()) += index
+        case None =>
+          // We're not initializing, determine the rack immediately
+          for (rack <- sched.getRackForHost(loc.host)) {
+            pendingTasksForRack.getOrElseUpdate(rack, new ArrayBuffer) += index
+          }
       }
     }
 

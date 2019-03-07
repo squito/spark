@@ -55,7 +55,7 @@ private[spark] class YarnScheduler(sc: SparkContext) extends TaskSchedulerImpl(s
    * @param hostPorts host list to resolve
    * @return rack list
    */
-  override def getRacksForHosts(hostPorts: List[String]): List[Option[String]] = {
+  override def getRacksForHosts(hostPorts: Seq[String]): Seq[Option[String]] = {
     val hosts = hostPorts.map(Utils.parseHostPort(_)._1)
     if (skipRackResolving) {
       hosts.map(_ => Option(NetworkTopology.DEFAULT_RACK))

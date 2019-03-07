@@ -18,6 +18,7 @@
 package org.apache.spark.deploy.yarn
 
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.JavaConverters._
 
 import com.google.common.base.Strings
 import org.apache.hadoop.conf.Configuration
@@ -92,10 +93,10 @@ object SparkRackResolver extends Logging {
     }
   }
 
-  def resolveRacks(conf: Configuration, hostNames: List[String]): List[Node] = {
+  def resolveRacks(conf: Configuration, hostNames: Seq[String]): List[Node] = {
     init(conf)
     val nodes = new ArrayBuffer[Node]
-    val rNameList = dnsToSwitchMapping.resolve(hostNames.toList.asJava).asScala
+    val rNameList = dnsToSwitchMapping.resolve(hostNames.asJava).asScala
     if (rNameList == null || rNameList.isEmpty) {
       hostNames.foreach(nodes += new NodeBase(_, NetworkTopology.DEFAULT_RACK))
       logInfo(s"Got an error when resolve hostNames. " +

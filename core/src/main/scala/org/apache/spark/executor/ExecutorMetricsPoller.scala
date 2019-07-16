@@ -45,7 +45,8 @@ import org.apache.spark.util.{ThreadUtils, Utils}
 @DeveloperApi
 private[spark] class ExecutorMetricsPoller(
     memoryManager: MemoryManager,
-    pollingInterval: Long)
+    pollingInterval: Long,
+    collectTaskMetrics: Boolean)
   extends Logging {
 
   type StageKey = (Int, Int)
@@ -88,7 +89,9 @@ private[spark] class ExecutorMetricsPoller(
     stageTCMP.forEachValue(LONG_MAX_VALUE, v => updatePeaks(v._2))
 
     // for each running task, update the peaks
-    taskMetricPeaks.forEachValue(LONG_MAX_VALUE, updatePeaks)
+    if (collectTaskMetrics) {
+      taskMetricPeaks.forEachValue(LONG_MAX_VALUE, updatePeaks)
+    }
   }
 
   /** Starts the polling thread. */
@@ -107,8 +110,10 @@ private[spark] class ExecutorMetricsPoller(
    * @param stageAttemptId the attempt number of the stage the task belongs to.
    */
   def onTaskStart(taskId: Long, stageId: Int, stageAttemptId: Int): Unit = {
-    // Put an entry in taskMetricPeaks for the task.
-    taskMetricPeaks.put(taskId, new AtomicLongArray(ExecutorMetricType.numMetrics))
+    if (collectTaskMetrics) {
+      // Put an entry in taskMetricPeaks for the task.
+      taskMetricPeaks.put(taskId, new AtomicLongArray(ExecutorMetricType.numMetrics))
+    }
 
     // Put a new entry in stageTCMP for the stage if there isn't one already.
     // Increment the task count.
@@ -144,8 +149,10 @@ private[spark] class ExecutorMetricsPoller(
 
     stageTCMP.computeIfPresent((stageId, stageAttemptId), decrementCount)
 
-    // Remove the entry from taskMetricPeaks for the task.
-    taskMetricPeaks.remove(taskId)
+    if (collectTaskMetrics) {
+      // Remove the entry from taskMetricPeaks for the task.
+      taskMetricPeaks.remove(taskId)
+    }
   }
 
   /**
@@ -154,6 +161,7 @@ private[spark] class ExecutorMetricsPoller(
    * @param taskId the id of the task that was run.
    */
   def getTaskMetricPeaks(taskId: Long): Array[Long] = {
+    if (!collectTaskMetrics) return ExecutorMetricsPoller.EMPTY_METRICS_ARRAY
     // If this is called with an invalid taskId or a valid taskId but the task was killed and
     // onTaskStart was therefore not called, then we return an array of zeros.
     val currentPeaks = taskMetricPeaks.get(taskId) // may be null
@@ -193,4 +201,8 @@ private[spark] class ExecutorMetricsPoller(
       exec.awaitTermination(10, TimeUnit.SECONDS)
     }
   }
+}
+
+private object ExecutorMetricsPoller {
+  val EMPTY_METRICS_ARRAY = new Array[Long](ExecutorMetricType.numMetrics)
 }

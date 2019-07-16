@@ -199,7 +199,10 @@ class ExecutorSuite extends SparkFunSuite
     // may be a false positive.  And we should call the uncaught exception handler.
     // SPARK-23816 also handle interrupts the same way, as killing an obsolete speculative task
     // does not represent a real fetch failure.
-    val conf = new SparkConf().setMaster("local").setAppName("executor suite test")
+    val conf = new SparkConf()
+      .setMaster("local")
+      .setAppName("executor suite test")
+      .set(EVENT_LOG_STAGE_EXECUTOR_METRICS, true)
     sc = new SparkContext(conf)
     val serializer = SparkEnv.get.closureSerializer.newInstance()
     val resultFunc = (context: TaskContext, itr: Iterator[Int]) => itr.size
@@ -324,7 +327,10 @@ class ExecutorSuite extends SparkFunSuite
     // Run a successful, trivial result task
     // We need to ensure, however, that executor metrics are polled after the task is started
     // so this requires some coordination using ExecutorSuiteHelper.
-    val conf = new SparkConf().setMaster("local").setAppName("executor suite test")
+    val conf = new SparkConf()
+      .setMaster("local")
+      .setAppName("executor suite test")
+      .set(EVENT_LOG_STAGE_EXECUTOR_METRICS, true)
     sc = new SparkContext(conf)
     val serializer = SparkEnv.get.closureSerializer.newInstance()
     ExecutorSuiteHelper.latches = new ExecutorSuiteHelper

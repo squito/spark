@@ -194,11 +194,15 @@ private[spark] class Executor(
   private val METRICS_POLLING_INTERVAL_MS = conf.get(EXECUTOR_METRICS_POLLING_INTERVAL)
 
   private val pollOnHeartbeat = if (METRICS_POLLING_INTERVAL_MS > 0) false else true
+  // don't bother collecting any memory metrics from the ask if we're not logging them in the
+  // EventLoggingListener
+  private val shouldLogStageExecutorMetrics = conf.get(EVENT_LOG_STAGE_EXECUTOR_METRICS)
 
   // Poller for the memory metrics. Visible for testing.
   private[executor] val metricsPoller = new ExecutorMetricsPoller(
     env.memoryManager,
-    METRICS_POLLING_INTERVAL_MS)
+    METRICS_POLLING_INTERVAL_MS,
+    shouldLogStageExecutorMetrics)
 
   // Executor for the heartbeat task.
   private val heartbeater = new Heartbeater(
